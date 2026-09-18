@@ -1,0 +1,327 @@
+@import "tailwindcss";
+
+/* ------------------------------------------------------------------ */
+/*  The Network — design tokens                                        */
+/*  Liquid Glass on WebKit: blur + saturate + translucency + specular  */
+/*  edge. Turquoise (blue↔green) accent on white; deep teal in dark.   */
+/* ------------------------------------------------------------------ */
+
+:root {
+  color-scheme: light;
+
+  /* Accent scale — turquoise */
+  --accent-50: #ecfeff;
+  --accent-100: #cffafe;
+  --accent-200: #a5f3fc;
+  --accent-300: #67e8f9;
+  --accent-400: #2ad4dd;
+  --accent-500: #0fb5ba;
+  --accent-600: #0a949a;
+  --accent-700: #0b767c;
+  --accent-800: #0e5d63;
+  --accent-900: #104d52;
+
+  --accent: var(--accent-500);
+  --accent-strong: var(--accent-600);
+  --accent-soft: var(--accent-100);
+  --accent-fg: #ffffff;
+
+  /* Neutral canvas */
+  --bg: #f4fbfb;
+  --bg-2: #eaf6f7;
+  --fg: #0b2426;
+  --fg-2: #3f5a5c;
+  --fg-3: #7a9295;
+  --fg-4: #a9bcbe;
+
+  /* Glass surfaces */
+  --glass: rgba(255, 255, 255, 0.62);
+  --glass-strong: rgba(255, 255, 255, 0.82);
+  --glass-tint: rgba(15, 181, 186, 0.06);
+  --glass-border: rgba(255, 255, 255, 0.85);
+  --glass-border-2: rgba(11, 36, 38, 0.08);
+  --glass-shadow: 0 1px 2px rgba(11, 36, 38, 0.04), 0 12px 40px -12px rgba(11, 36, 38, 0.18);
+  --glass-shadow-lg: 0 2px 4px rgba(11, 36, 38, 0.05), 0 24px 70px -20px rgba(11, 36, 38, 0.28);
+  --specular: linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.2) 40%, rgba(255, 255, 255, 0) 60%, rgba(255, 255, 255, 0.5));
+
+  /* Warmth */
+  --warm-inner: #ff6b6b;
+  --warm-active: var(--accent-500);
+  --warm-dormant: #f4b942;
+  --warm-archive: #9aa9ab;
+
+  /* Semantic */
+  --danger: #e5484d;
+  --success: #12a594;
+
+  /* Geometry */
+  --r-sm: 12px;
+  --r-md: 18px;
+  --r-lg: 24px;
+  --r-xl: 32px;
+
+  /* Safe areas (iOS) */
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+}
+
+.dark {
+  color-scheme: dark;
+
+  --accent: var(--accent-400);
+  --accent-strong: var(--accent-300);
+  --accent-soft: rgba(42, 212, 221, 0.16);
+  --accent-fg: #042a2c;
+
+  --bg: #061516;
+  --bg-2: #0a1f21;
+  --fg: #e8f6f6;
+  --fg-2: #b4cdcf;
+  --fg-3: #7a9698;
+  --fg-4: #4a6466;
+
+  --glass: rgba(16, 40, 42, 0.55);
+  --glass-strong: rgba(16, 40, 42, 0.8);
+  --glass-tint: rgba(42, 212, 221, 0.05);
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --glass-border-2: rgba(255, 255, 255, 0.06);
+  --glass-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 40px -12px rgba(0, 0, 0, 0.6);
+  --glass-shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.4), 0 24px 70px -20px rgba(0, 0, 0, 0.75);
+  --specular: linear-gradient(135deg, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0.04) 40%, rgba(255, 255, 255, 0) 60%, rgba(255, 255, 255, 0.12));
+
+  --warm-archive: #6b7f81;
+}
+
+@theme inline {
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-50: var(--accent-50);
+  --color-accent-100: var(--accent-100);
+  --color-accent-200: var(--accent-200);
+  --color-accent-300: var(--accent-300);
+  --color-accent-400: var(--accent-400);
+  --color-accent-500: var(--accent-500);
+  --color-accent-600: var(--accent-600);
+  --color-accent-700: var(--accent-700);
+  --color-accent-800: var(--accent-800);
+  --color-accent-900: var(--accent-900);
+
+  --color-bg: var(--bg);
+  --color-bg-2: var(--bg-2);
+  --color-fg: var(--fg);
+  --color-fg-2: var(--fg-2);
+  --color-fg-3: var(--fg-3);
+  --color-fg-4: var(--fg-4);
+  --color-danger: var(--danger);
+  --color-success: var(--success);
+
+  --color-warm-inner: var(--warm-inner);
+  --color-warm-active: var(--warm-active);
+  --color-warm-dormant: var(--warm-dormant);
+  --color-warm-archive: var(--warm-archive);
+
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r-md);
+  --radius-lg: var(--r-lg);
+  --radius-xl: var(--r-xl);
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Inter, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ---------- base ---------- */
+
+html {
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+html,
+body {
+  height: 100%;
+  overscroll-behavior-y: none;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
+  letter-spacing: -0.011em;
+}
+
+/* Ambient background: soft turquoise auras that glass surfaces blur over */
+.app-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  background: var(--bg);
+}
+.app-bg::before,
+.app-bg::after {
+  content: "";
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(80px);
+  opacity: 0.55;
+}
+.app-bg::before {
+  width: 60vmax;
+  height: 60vmax;
+  left: -20vmax;
+  top: -25vmax;
+  background: radial-gradient(closest-side, var(--accent-200), transparent);
+}
+.app-bg::after {
+  width: 55vmax;
+  height: 55vmax;
+  right: -20vmax;
+  bottom: -25vmax;
+  background: radial-gradient(closest-side, #bfe9ff, transparent);
+}
+.dark .app-bg::before {
+  background: radial-gradient(closest-side, rgba(15, 181, 186, 0.35), transparent);
+  opacity: 0.7;
+}
+.dark .app-bg::after {
+  background: radial-gradient(closest-side, rgba(38, 99, 235, 0.25), transparent);
+  opacity: 0.6;
+}
+
+/* ---------- glass primitives ---------- */
+
+@utility glass {
+  position: relative;
+  background: var(--glass);
+  background-image: linear-gradient(var(--glass-tint), var(--glass-tint));
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  backdrop-filter: blur(24px) saturate(1.6);
+  border: 1px solid var(--glass-border-2);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-border);
+}
+
+@utility glass-strong {
+  position: relative;
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: blur(32px) saturate(1.8);
+  backdrop-filter: blur(32px) saturate(1.8);
+  border: 1px solid var(--glass-border-2);
+  box-shadow: var(--glass-shadow-lg), inset 0 1px 0 var(--glass-border);
+}
+
+/* Specular highlight ring — apply to an element with rounded corners */
+@utility specular {
+  position: relative;
+}
+.specular::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--specular);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0.9;
+}
+
+@utility pressable {
+  transition:
+    transform 180ms var(--ease-spring),
+    opacity 180ms var(--ease-spring),
+    box-shadow 180ms var(--ease-spring);
+}
+.pressable:active {
+  transform: scale(0.97);
+}
+
+@utility text-balance {
+  text-wrap: balance;
+}
+
+@utility no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+@utility safe-top {
+  padding-top: var(--sat);
+}
+@utility safe-bottom {
+  padding-bottom: var(--sab);
+}
+
+/* Selection + focus */
+::selection {
+  background: color-mix(in oklab, var(--accent) 30%, transparent);
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Tiptap editor */
+.tiptap {
+  outline: none;
+  min-height: 40vh;
+  line-height: 1.6;
+  font-size: 17px;
+}
+.tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--fg-4);
+  float: left;
+  pointer-events: none;
+  height: 0;
+}
+.tiptap h1 { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; margin: 0.6em 0 0.3em; }
+.tiptap h2 { font-size: 1.35rem; font-weight: 650; letter-spacing: -0.015em; margin: 0.8em 0 0.3em; }
+.tiptap h3 { font-size: 1.1rem; font-weight: 600; margin: 0.8em 0 0.2em; }
+.tiptap p { margin: 0.35em 0; }
+.tiptap ul, .tiptap ol { padding-left: 1.4em; margin: 0.35em 0; }
+.tiptap ul { list-style: disc; }
+.tiptap ol { list-style: decimal; }
+.tiptap a { color: var(--accent-strong); text-decoration: underline; text-underline-offset: 3px; }
+.tiptap blockquote { border-left: 3px solid var(--accent-300); padding-left: 1em; color: var(--fg-2); margin: 0.6em 0; }
+.tiptap code { font-family: var(--font-mono); font-size: 0.9em; background: var(--accent-soft); padding: 0.1em 0.35em; border-radius: 6px; }
+.tiptap hr { border: 0; border-top: 1px solid var(--glass-border-2); margin: 1.2em 0; }
+.tiptap ul[data-type="taskList"] { list-style: none; padding-left: 0.2em; }
+.tiptap ul[data-type="taskList"] li { display: flex; gap: 0.6em; align-items: flex-start; }
+.tiptap ul[data-type="taskList"] li > label { margin-top: 0.3em; }
+.tiptap ul[data-type="taskList"] li > label input {
+  appearance: none; width: 20px; height: 20px; border-radius: 9999px;
+  border: 1.5px solid var(--fg-4); display: grid; place-items: center; cursor: pointer;
+  transition: all 150ms var(--ease-spring);
+}
+.tiptap ul[data-type="taskList"] li > label input:checked {
+  background: var(--accent); border-color: var(--accent);
+}
+.tiptap ul[data-type="taskList"] li > label input:checked::after {
+  content: ""; width: 6px; height: 10px; border: solid var(--accent-fg);
+  border-width: 0 2px 2px 0; transform: translateY(-1px) rotate(45deg);
+}
+.tiptap ul[data-type="taskList"] li[data-checked="true"] > div { color: var(--fg-3); text-decoration: line-through; }
+.tiptap .mention {
+  color: var(--accent-strong); background: var(--accent-soft); border-radius: 8px; padding: 0.05em 0.4em; font-weight: 500;
+}
+
+/* Motion-reduce */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}

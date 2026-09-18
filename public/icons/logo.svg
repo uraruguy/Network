@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="ng" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#34dbe3"/>
+      <stop offset="1" stop-color="#0a8f96"/>
+    </linearGradient>
+    <linearGradient id="gl" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.38"/>
+      <stop offset="0.45" stop-color="#fff" stop-opacity="0.06"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14.5" fill="url(#ng)"/>
+  <rect width="64" height="64" rx="14.5" fill="url(#gl)"/>
+  <circle cx="32" cy="32" r="19" stroke="#fff" stroke-opacity="0.28" stroke-width="1.6"/>
+  <ellipse cx="32" cy="32" rx="8" ry="19" stroke="#fff" stroke-opacity="0.18" stroke-width="1.2"/>
+  <path d="M13 32 H51" stroke="#fff" stroke-opacity="0.18" stroke-width="1.2"/>
+  <path d="M20 44 V20 L44 44 V20" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="20" cy="44" r="4.6" fill="#fff"/>
+  <circle cx="20" cy="20" r="4.6" fill="#fff"/>
+  <circle cx="44" cy="44" r="4.6" fill="#fff"/>
+  <circle cx="44" cy="20" r="4.6" fill="#fff"/>
+  <circle cx="20" cy="44" r="2" fill="#0a8f96"/>
+  <circle cx="20" cy="20" r="2" fill="#0a8f96"/>
+  <circle cx="44" cy="44" r="2" fill="#0a8f96"/>
+  <circle cx="44" cy="20" r="2" fill="#0a8f96"/>
+</svg>
