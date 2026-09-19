@@ -19,44 +19,43 @@ export function ImportPeople({ jobId, onCommitted }: { jobId: string; onCommitte
   const { data: agg = [], isPending } = useQuery({ queryKey: ["import", "people", jobId], queryFn: () => api.get<AggregatedPerson[]>(`/api/import/${jobId}/people`) });
   const { data: cats = [] } = useCategories();
   const { data: people = [] } = usePeople();
-  const [rows, setRows] = useState<Record<string, Row>>({});
+  const [rows, setRows] = useState<Record<string, Row>>(() => {
+    try { return JSON.parse(localStorage.getItem(`import-decisions-${jobId}`) ?? "{}"); } catch { return {}; }
+  });
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<string | null>(null);
   const [minMentions, setMinMentions] = useState(1);
   const [applying, setApplying] = useState<null | { committed: number; remaining: number }>(null);
   const storageKey = `import-decisions-${jobId}`;
 
-  // Defaults: merge when a match exists, otherwise undecided; restore saved choices.
-  useEffect(() => {
-    if (!agg.length) return;
-    let saved: Record<string, Row> = {};
-    try { saved = JSON.parse(localStorage.getItem(storageKey) ?? "{}"); } catch {}
-    setRows((prev) => {
-      const next = { ...prev };
-      for (const p of agg) {
-        if (next[p.key]) continue;
-        const top = Object.entries(p.categories).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k]) => k);
-        next[p.key] = saved[p.key] ?? { action: p.matchPersonId ? "merge" : "undecided", personId: p.matchPersonId, name: p.name, city: p.cities[0] ?? "", categories: top };
-      }
-      return next;
-    });
-  }, [agg, storageKey]);
+  // Defaults (merge when a match exists, otherwise undecided) are derived, not stored, until edited.
+  const defaultRow = (p: AggregatedPerson): Row => ({
+    action: p.matchPersonId ? "merge" : "undecided",
+    personId: p.matchPersonId,
+    name: p.name,
+    city: p.cities[0] ?? "",
+    categories: Object.entries(p.categories).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k]) => k),
+  });
+  const rowFor = (p: AggregatedPerson): Row => rows[p.key] ?? defaultRow(p);
   useEffect(() => {
     if (Object.keys(rows).length) try { localStorage.setItem(storageKey, JSON.stringify(rows)); } catch {}
   }, [rows, storageKey]);
 
-  const set = (key: string, patch: Partial<Row>) => setRows((r) => ({ ...r, [key]: { ...r[key]!, ...patch } }));
+  const byKey = useMemo(() => Object.fromEntries(agg.map((p) => [p.key, p])), [agg]);
+  const set = (key: string, patch: Partial<Row>) => setRows((r) => ({ ...r, [key]: { ...(r[key] ?? defaultRow(byKey[key]!)), ...patch } }));
   const visible = useMemo(() => agg.filter((p) => p.mentions >= minMentions && (!q || p.name.toLowerCase().includes(q.toLowerCase()) || p.aliases.some((a) => a.toLowerCase().includes(q.toLowerCase())))), [agg, minMentions, q]);
   const counts = useMemo(() => {
     const c = { create: 0, merge: 0, skip: 0, undecided: 0 };
-    for (const p of agg) c[rows[p.key]?.action ?? "undecided"]++;
+    for (const p of agg) c[rowFor(p).action]++;
     return c;
   }, [agg, rows]);
-  const bulk = (action: Row["action"]) => setRows((r) => { const n = { ...r }; for (const p of visible) n[p.key] = { ...n[p.key]!, action }; return n; });
+  const bulk = (action: Row["action"]) => setRows((r) => { const n = { ...r }; for (const p of visible) n[p.key] = { ...(n[p.key] ?? defaultRow(p)), action }; return n; });
 
   const apply = async () => {
     const decisions: PeopleDecisions = {};
-    for (const [key, r] of Object.entries(rows)) {
+    for (const p of agg) {
+      const r = rowFor(p);
+      const key = p.key;
       if (r.action === "undecided") continue;
       decisions[key] = { action: r.action, personId: r.action === "merge" ? r.personId : null, name: r.name, city: r.city || null, categories: r.categories };
     }
@@ -107,8 +106,7 @@ export function ImportPeople({ jobId, onCommitted }: { jobId: string; onCommitte
       <GlassCard padded={false} className="p-1.5">
         <ul className="divide-y divide-[var(--glass-border-2)]">
           {visible.map((p) => {
-            const r = rows[p.key];
-            if (!r) return null;
+            const r = rowFor(p);
             const isOpen = open === p.key;
             return (
               <li key={p.key} className={cn("px-2 py-2", r.action === "skip" && "opacity-50")}>
