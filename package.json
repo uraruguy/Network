@@ -13,7 +13,7 @@
     "db:seed-cities": "tsx scripts/seed-cities.ts",
     "notes:export": "tsx scripts/apple-notes/export.ts",
     "dev:cloud": "dotenv -e .env.cloud.local -o -- concurrently -p none \"serwist build --watch\" \"next dev -p 3100\"",
-    "notes:import-smoke": "dotenv -e .env.cloud.local -o -- tsx scripts/ai-smoke.ts"
+    "notes:import": "dotenv -e .env.cloud.local -o -- tsx scripts/import-cli.ts .cache/notes-export.json --label \"Apple Notes\""
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.56",
