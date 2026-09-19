@@ -1,7 +1,7 @@
 import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from "ai";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { aiConfigured, aiModel } from "@/lib/ai/provider";
+import { aiConfigured, aiModel, toolsAreProviderExecuted } from "@/lib/ai/provider";
 import { networkTools } from "@/lib/ai/tools";
 import { listCategories } from "@/lib/data/categories";
 import { ensureThread, saveMessages } from "@/lib/data/chat";
@@ -19,7 +19,7 @@ const body = z.object({
 export async function POST(req: Request) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
-  if (!aiConfigured()) return NextResponse.json({ error: "OPENROUTER_API_KEY is not configured" }, { status: 400 });
+  if (!aiConfigured()) return NextResponse.json({ error: "AI is not configured (see .env.example)" }, { status: 400 });
   const parsed = body.safeParse(await req.json());
   if (!parsed.success) return NextResponse.json({ error: "Bad request" }, { status: 400 });
   const { id, messages, personId } = parsed.data;
@@ -41,12 +41,14 @@ Rules:
 - When asked "who should I follow up with", combine due_followups with dormant/important people not contacted recently.
 - Dates: convert relative phrases ("in 3 months") to ISO date-times at 09:00 local when creating reminders.${personId ? `\nThe user opened this chat from a specific person's page (id ${personId}). Assume questions refer to them unless stated otherwise; call get_person first.` : ""}`;
 
+  const tools = networkTools(ownerId);
+  const providerExecuted = toolsAreProviderExecuted();
   const result = streamText({
-    model: aiModel(),
+    model: await aiModel({ tools, maxTurns: 10 }),
     system,
     messages: await convertToModelMessages(messages),
-    tools: networkTools(ownerId),
-    stopWhen: stepCountIs(8),
+    // With the Agent SDK the CLI runs the tools itself (bridged as MCP); the `ai` loop must not also try.
+    ...(providerExecuted ? {} : { tools, stopWhen: stepCountIs(8) }),
     maxOutputTokens: 2000,
   });
 

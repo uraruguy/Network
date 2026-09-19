@@ -3,8 +3,12 @@ import { z } from "zod";
 const server = z.object({
   DATABASE_URL: z.string().url(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
+  AI_PROVIDER: z.enum(["agent-sdk", "anthropic", "openrouter"]).optional(),
+  ANTHROPIC_API_KEY: z.string().min(1).optional(),
   OPENROUTER_API_KEY: z.string().min(1).optional(),
   OPENROUTER_MODEL: z.string().default("anthropic/claude-opus-5"),
+  AI_MODEL_MAIN: z.string().min(1).optional(),
+  AI_MODEL_FAST: z.string().min(1).optional(),
   RESEND_API_KEY: z.string().min(1).optional(),
   EMAIL_FROM: z.string().default("The Network <onboarding@resend.dev>"),
   CRON_SECRET: z.string().min(16).optional(),

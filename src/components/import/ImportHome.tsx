@@ -36,7 +36,7 @@ export function ImportHome() {
       {data && !data.aiConfigured && (
         <GlassCard className="mb-4 flex items-start gap-3 border-warm-dormant/40">
           <AlertTriangle className="mt-0.5 shrink-0 text-warm-dormant" size={18} />
-          <p className="text-[14px]">AI isn’t configured yet — add <code className="rounded bg-fg/6 px-1">OPENROUTER_API_KEY</code> to the environment to classify and extract notes.</p>
+          <p className="text-[14px]">AI isn’t configured yet — set <code className="rounded bg-fg/6 px-1">AI_PROVIDER=agent-sdk</code> (your Claude subscription, on your Mac) or an API key in the environment.</p>
         </GlassCard>
       )}
       <div className="grid gap-4 lg:grid-cols-2">

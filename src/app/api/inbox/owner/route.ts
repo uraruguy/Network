@@ -11,6 +11,6 @@ export const GET = withOwner(async ({ ownerId }) => listInbox(ownerId));
 export const POST = withOwner(async ({ ownerId, req }) => {
   const { text } = await parseBody(req, z.object({ text: z.string().trim().min(1).max(20000) }));
   const item = await addInbox(ownerId, text, "app");
-  if (!aiConfigured()) throw new HttpError(400, "OPENROUTER_API_KEY is not configured");
+  if (!aiConfigured()) throw new HttpError(400, "AI is not configured (see .env.example)");
   return triageInbox(ownerId, item.id);
 });

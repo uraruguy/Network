@@ -7,6 +7,6 @@ export const GET = withOwner(async ({ ownerId }) => ({ jobs: await listJobs(owne
 
 export const POST = withOwner(async ({ ownerId, req }) => {
   const body = await parseBody(req, z.object({ rows: z.array(exportRow).min(1).max(5000), label: z.string().optional() }));
-  if (!aiConfigured()) throw new HttpError(400, "OPENROUTER_API_KEY is not configured");
+  if (!aiConfigured()) throw new HttpError(400, "AI is not configured (see .env.example)");
   return createImportJob(ownerId, body.rows, body.label);
 });

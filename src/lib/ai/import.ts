@@ -11,7 +11,7 @@ export async function classifyBatch(items: { id: string; title: string | null; t
     .map((it) => `### ${it.id}\nFolder: ${it.folder ?? "-"}\nTitle: ${it.title ?? "-"}\n${it.text.slice(0, 700)}`)
     .join("\n\n");
   const { output } = await generateText({
-    model: aiFastModel(),
+    model: await aiFastModel(),
     system: SYSTEM,
     output: Output.object({ schema: classificationSchema, name: "classification" }),
     prompt: `Classify each note below. A note is about people when it records information about specific, named humans Jakob has met or wants to remember (who they are, what they said, how they met). Meeting notes with a named counterpart count. Daily diary entries, company/task notes, quotes, ideas, travel logs without notable people are not_people.\n\n${list}`,
@@ -22,7 +22,7 @@ export async function classifyBatch(items: { id: string; title: string | null; t
 export async function extractNote(input: { title: string | null; text: string; html: string | null; created: string | null; folder: string | null; existingNames: string[] }): Promise<Extraction> {
   const known = input.existingNames.length ? `\nPeople already in The Network (use these exact names when the note is about them): ${input.existingNames.slice(0, 400).join("; ")}` : "";
   const { output } = await generateText({
-    model: aiModel(),
+    model: await aiModel(),
     system: SYSTEM,
     output: Output.object({ schema: extractionSchema, name: "extraction" }),
     prompt: `Extract the people from this Apple Note into structured candidates. One candidate per real person Jakob would want as a contact card. Skip Jakob himself, companies, and people mentioned only in passing with nothing memorable.

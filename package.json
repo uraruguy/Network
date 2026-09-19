@@ -14,6 +14,7 @@
     "notes:export": "tsx scripts/apple-notes/export.ts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.56",
     "@ai-sdk/react": "^4.0.108",
     "@openrouter/ai-sdk-provider": "^3.0.0",
     "@serwist/next": "^9.5.12",
@@ -32,6 +33,7 @@
     "@tiptap/react": "^3.31.3",
     "@tiptap/starter-kit": "^3.31.3",
     "ai": "^7.0.105",
+    "ai-sdk-provider-claude-code": "^4.3.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",

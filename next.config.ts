@@ -11,6 +11,9 @@ const absStubs = Object.fromEntries(Object.entries(stubs).map(([k, v]) => [k, pa
 const nextConfig: NextConfig = {
   // three-globe pulls in three's WebGPU build for a heatmap layer we don't use (see src/lib/stubs).
   turbopack: { resolveAlias: stubs },
+  // The Agent SDK (Claude subscription path) is only for local use; never trace its CLI binary into functions.
+  serverExternalPackages: ["ai-sdk-provider-claude-code", "@anthropic-ai/claude-agent-sdk"],
+  outputFileTracingExcludes: { "*": ["./node_modules/.pnpm/@anthropic-ai+claude-agent-sdk*/**", "./node_modules/@anthropic-ai/claude-agent-sdk*/**"] },
   webpack(config) {
     config.resolve.alias = { ...config.resolve.alias, ...absStubs };
     return config;
