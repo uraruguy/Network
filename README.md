@@ -23,6 +23,13 @@ pnpm dev                     # http://localhost:3100
 4. Schedule the hourly digest from Postgres: `select set_digest_target('https://<your-app>.vercel.app', '<CRON_SECRET>');` (uses pg_cron + pg_net). `vercel.json` also has a daily fallback.
 5. Sign up once with your email — the first account claims the instance; further sign-ups are rejected.
 
+## Local Mac against the cloud database (recommended for the Apple Notes import)
+`.env.cloud.local` holds the production Supabase keys plus `AI_PROVIDER=agent-sdk` (your Claude subscription via the Claude Agent SDK — run `claude` once in Terminal and `/login`). Then:
+```bash
+pnpm dev:cloud     # http://localhost:3100, writes straight into the cloud DB your phone uses
+```
+Heavy AI work (importing hundreds of notes with Opus) runs on your subscription here; the deployed app uses an API key for the small, frequent calls.
+
 ## Install on iPhone / Mac
 - iPhone: open the URL in Safari → Share → **Add to Home Screen**. Works offline, full screen.
 - Mac: Safari → File → **Add to Dock**.

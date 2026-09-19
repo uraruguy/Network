@@ -11,7 +11,9 @@
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:seed-cities": "tsx scripts/seed-cities.ts",
-    "notes:export": "tsx scripts/apple-notes/export.ts"
+    "notes:export": "tsx scripts/apple-notes/export.ts",
+    "dev:cloud": "dotenv -e .env.cloud.local -o -- concurrently -p none \"serwist build --watch\" \"next dev -p 3100\"",
+    "notes:import-smoke": "dotenv -e .env.cloud.local -o -- tsx scripts/ai-smoke.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.56",
@@ -71,6 +73,7 @@
     "@types/turndown": "^5.0.6",
     "concurrently": "^10.0.5",
     "dotenv": "^18.0.0",
+    "dotenv-cli": "^11.0.0",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
