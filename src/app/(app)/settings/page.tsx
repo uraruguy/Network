@@ -1,12 +1,12 @@
 import { PageHeader } from "@/components/shell/PageHeader";
 import { GlassCard } from "@/components/glass/GlassCard";
 
-export const metadata = { title: "Usettings" };
+export const metadata = { title: "Settings" };
 
-export default function UsettingsPage() {
+export default function SettingsPage() {
   return (
     <>
-      <PageHeader title="Usettings" />
+      <PageHeader title="Settings" />
       <GlassCard>
         <p className="text-fg-2">Coming up next.</p>
       </GlassCard>

@@ -1,15 +1,12 @@
-import { PageHeader } from "@/components/shell/PageHeader";
-import { GlassCard } from "@/components/glass/GlassCard";
+import { Suspense } from "react";
+import { PeopleList } from "@/components/people/PeopleList";
 
-export const metadata = { title: "Upeople" };
+export const metadata = { title: "People" };
 
-export default function UpeoplePage() {
+export default function PeoplePage() {
   return (
-    <>
-      <PageHeader title="Upeople" />
-      <GlassCard>
-        <p className="text-fg-2">Coming up next.</p>
-      </GlassCard>
-    </>
+    <Suspense>
+      <PeopleList />
+    </Suspense>
   );
 }

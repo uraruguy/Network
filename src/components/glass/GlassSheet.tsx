@@ -1,6 +1,6 @@
 "use client";
 import { cn } from "@/lib/utils";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useDragControls } from "motion/react";
 import { X } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -19,6 +19,7 @@ type Props = {
  * Bottom sheet on phones, centered glass dialog on desktop.
  */
 export function GlassSheet({ open, onClose, title, children, width = 560, footer }: Props) {
+  const drag = useDragControls();
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -56,14 +57,18 @@ export function GlassSheet({ open, onClose, title, children, width = 560, footer
             exit={{ y: 48, scale: 0.98, opacity: 0 }}
             transition={{ type: "spring", stiffness: 420, damping: 38 }}
             drag="y"
+            dragListener={false}
+            dragControls={drag}
             dragConstraints={{ top: 0, bottom: 0 }}
             dragElastic={{ top: 0, bottom: 0.4 }}
             onDragEnd={(_, info) => {
               if (info.offset.y > 120 || info.velocity.y > 800) onClose();
             }}
           >
-            <div className="mx-auto mt-2 h-1.5 w-10 rounded-full bg-fg/15 sm:hidden" />
-            <div className="flex items-center justify-between px-5 pt-3 pb-1 sm:pt-5">
+            <div className="cursor-grab touch-none py-2 sm:hidden" onPointerDown={(e) => drag.start(e)}>
+              <div className="mx-auto h-1.5 w-10 rounded-full bg-fg/15" />
+            </div>
+            <div className="flex items-center justify-between px-5 pt-1 pb-1 sm:pt-5">
               <h2 className="text-[19px] font-semibold tracking-tight">{title}</h2>
               <button
                 onClick={onClose}

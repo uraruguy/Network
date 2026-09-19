@@ -49,3 +49,39 @@ export function localTimeIn(timeZone: string | null | undefined, now = new Date(
     return null;
   }
 }
+
+export function flag(countryCode?: string | null) {
+  if (!countryCode || countryCode.length !== 2) return "";
+  return String.fromCodePoint(...[...countryCode.toUpperCase()].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65));
+}
+
+export const WARMTH_META = {
+  inner: { label: "Inner circle", color: "var(--warm-inner)", hint: "People closest to you" },
+  active: { label: "Active", color: "var(--warm-active)", hint: "In regular contact" },
+  dormant: { label: "Dormant", color: "var(--warm-dormant)", hint: "Worth reviving" },
+  archive: { label: "Archive", color: "var(--warm-archive)", hint: "Keeping the record" },
+} as const;
+
+export function locationLabel(l?: { name: string; country: string; countryCode?: string | null } | null) {
+  if (!l) return "";
+  return `${flag(l.countryCode)} ${l.name}, ${l.country}`.trim();
+}
+
+export const CIRCLE_META = {
+  nice_to_know: { label: "Nice to know", short: "Nice to know", color: "#9aa9ab", hint: "Good to have in the network" },
+  hang_out_more: { label: "Want to hang out more", short: "Hang out more", color: "#f4b942", hint: "I'd like to see them more often" },
+  potential_close: { label: "Potential to be very close", short: "Very close", color: "#ff6b6b", hint: "Could become one of my closest people" },
+} as const;
+
+export const HOBBY_META: Record<string, { label: string; emoji: string }> = {
+  football: { label: "Football", emoji: "⚽️" },
+  skiing: { label: "Skiing", emoji: "⛷️" },
+  hiking: { label: "Hiking", emoji: "🥾" },
+  running: { label: "Running", emoji: "🏃" },
+  padel: { label: "Padel", emoji: "🎾" },
+  partying: { label: "Partying", emoji: "🪩" },
+  coffee: { label: "Just coffee", emoji: "☕️" },
+  lunch: { label: "Lunch guy", emoji: "🍽️" },
+  gym: { label: "Gym", emoji: "🏋️" },
+  other: { label: "Other", emoji: "✨" },
+};

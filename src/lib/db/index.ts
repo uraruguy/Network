@@ -4,7 +4,6 @@ import * as schema from "./schema";
 import { serverEnv } from "@/lib/env";
 
 declare global {
-  // eslint-disable-next-line no-var
   var __networkSql: ReturnType<typeof postgres> | undefined;
 }
 

@@ -1,12 +1,12 @@
 import { PageHeader } from "@/components/shell/PageHeader";
 import { GlassCard } from "@/components/glass/GlassCard";
 
-export const metadata = { title: "Uglobe" };
+export const metadata = { title: "Globe" };
 
-export default function UglobePage() {
+export default function GlobePage() {
   return (
     <>
-      <PageHeader title="Uglobe" />
+      <PageHeader title="Globe" />
       <GlassCard>
         <p className="text-fg-2">Coming up next.</p>
       </GlassCard>

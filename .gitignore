@@ -42,3 +42,4 @@ next-env.d.ts
 public/sw*
 .env*.local
 drizzle/meta
+.cache

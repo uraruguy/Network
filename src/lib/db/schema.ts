@@ -13,6 +13,7 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
 /* ------------------------------------------------------------------ */
@@ -20,6 +21,7 @@ import {
 /* ------------------------------------------------------------------ */
 
 export const warmthEnum = pgEnum("warmth", ["inner", "active", "dormant", "archive"]);
+export const circleEnum = pgEnum("circle", ["nice_to_know", "hang_out_more", "potential_close"]);
 export const noteKindEnum = pgEnum("note_kind", ["note", "meeting", "call", "message"]);
 export const reminderStatusEnum = pgEnum("reminder_status", ["pending", "sent", "done", "snoozed"]);
 export const recurrenceEnum = pgEnum("recurrence", ["none", "monthly", "quarterly", "semiannual", "yearly", "custom_days"]);
@@ -28,6 +30,8 @@ export const inboxStatusEnum = pgEnum("inbox_status", ["new", "proposed", "appli
 export const chatRoleEnum = pgEnum("chat_role", ["user", "assistant", "system", "tool"]);
 
 export const WARMTH = warmthEnum.enumValues;
+export const CIRCLES = circleEnum.enumValues;
+export const HOBBIES = ["football", "skiing", "hiking", "running", "padel", "partying", "coffee", "lunch", "gym", "other"] as const;
 export const NOTE_KINDS = noteKindEnum.enumValues;
 export const RECURRENCE = recurrenceEnum.enumValues;
 
@@ -134,9 +138,12 @@ export const people = pgTable(
     metContext: text("met_context"),
     metAt: date("met_at"),
     metLocationId: uuid("met_location_id").references(() => locations.id, { onDelete: "set null" }),
-    introducedById: uuid("introduced_by_id"),
+    introducedById: uuid("introduced_by_id").references((): AnyPgColumn => people.id, { onDelete: "set null" }),
 
     warmth: warmthEnum("warmth").notNull().default("active"),
+    circle: circleEnum("circle"),
+    hobbies: text("hobbies").array().notNull().default(sql`'{}'::text[]`),
+    hobbiesOther: text("hobbies_other"),
 
     email: text("email"),
     phone: text("phone"),
@@ -360,6 +367,7 @@ export const peopleRelations = relations(people, ({ one, many }) => ({
   homeLocation: one(locations, { fields: [people.homeLocationId], references: [locations.id], relationName: "home" }),
   metLocation: one(locations, { fields: [people.metLocationId], references: [locations.id], relationName: "met" }),
   introducedBy: one(people, { fields: [people.introducedById], references: [people.id], relationName: "introducer" }),
+  introduced: many(people, { relationName: "introducer" }),
   categories: many(personCategories),
   tags: many(personTags),
   notes: many(notes),
@@ -419,4 +427,6 @@ export type City = typeof cities.$inferSelect;
 export type ImportItem = typeof importItems.$inferSelect;
 export type InboxItem = typeof inboxItems.$inferSelect;
 export type Warmth = (typeof WARMTH)[number];
+export type Circle = (typeof CIRCLES)[number];
+export type Hobby = (typeof HOBBIES)[number];
 export type NoteKind = (typeof NOTE_KINDS)[number];
