@@ -31,12 +31,16 @@ export const viewport: Viewport = {
 
 // Applies .dark before first paint; honours a saved override.
 const themeScript = `(function(){try{var t=localStorage.getItem('theme');var d=t?t==='dark':matchMedia('(prefers-color-scheme: dark)').matches;if(d)document.documentElement.classList.add('dark');}catch(e){}})();`;
+const devErrorHook =
+  process.env.NODE_ENV === "development"
+    ? `window.__errs=[];addEventListener('error',function(e){window.__errs.push(String(e.error&&e.error.stack||e.message).slice(0,2000))});addEventListener('unhandledrejection',function(e){window.__errs.push('REJ '+String(e.reason&&e.reason.stack||e.reason).slice(0,2000))});`
+    : "";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+        <script dangerouslySetInnerHTML={{ __html: themeScript + devErrorHook }} />
       </head>
       <body className="min-h-dvh antialiased">
         <SerwistProvider swUrl="/sw.js">

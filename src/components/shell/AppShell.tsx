@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { NAV } from "./nav";
 import { OnlineIndicator } from "./OnlineIndicator";
 import { Logo } from "./Logo";
+import { Hydrated } from "./Hydrated";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -60,7 +61,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           isGlobe ? "" : "pb-[calc(84px+var(--sab))] lg:pb-8",
         )}
       >
-        <div className={cn(isGlobe ? "" : "mx-auto w-full max-w-[1100px] px-4 sm:px-6 lg:px-10 pt-[calc(12px+var(--sat))] lg:pt-8")}>{children}</div>
+        <div className={cn(isGlobe ? "" : "mx-auto w-full max-w-[1100px] px-4 sm:px-6 lg:px-10 pt-[calc(12px+var(--sat))] lg:pt-8")}>
+          <Hydrated>{children}</Hydrated>
+        </div>
       </main>
 
       {/* Mobile tab bar */}

@@ -1,5 +1,5 @@
 @import "tailwindcss" source(none);
-@source "../";
+@source "../../src";
 
 /* ------------------------------------------------------------------ */
 /*  The Network — design tokens                                        */
