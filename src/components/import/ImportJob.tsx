@@ -9,6 +9,7 @@ import type { StoredExtraction } from "@/lib/data/import";
 import { useImportJob, useItemAction, type ImportItemRow } from "@/lib/queries/import";
 import { cn, formatDate } from "@/lib/utils";
 import { ImportItemCard } from "./ImportItemCard";
+import { ImportPeople } from "./ImportPeople";
 
 type Phase = "idle" | "classifying" | "extracting" | "done";
 
@@ -17,7 +18,7 @@ export function ImportJob({ jobId }: { jobId: string }) {
   const running = phase === "classifying" || phase === "extracting";
   const { data: job, refetch } = useImportJob(jobId, running ? 2500 : false);
   const act = useItemAction(jobId);
-  const [tab, setTab] = useState<"review" | "committed" | "skipped" | "failed">("review");
+  const [tab, setTab] = useState<"people" | "review" | "committed" | "skipped" | "failed">("people");
   const [bulkBusy, setBulkBusy] = useState(false);
   const started = useRef(false);
 
@@ -62,7 +63,7 @@ export function ImportJob({ jobId }: { jobId: string }) {
 
   const total = job.items.length;
   const doneAi = total - (counts.pending ?? 0) - (counts.classified ?? 0);
-  const lists: Record<typeof tab, ImportItemRow[]> = {
+  const lists: Record<Exclude<typeof tab, "people">, ImportItemRow[]> = {
     review: job.items.filter((i) => i.status === "extracted"),
     committed: job.items.filter((i) => i.status === "committed"),
     skipped: job.items.filter((i) => i.status === "skipped"),
@@ -98,7 +99,7 @@ export function ImportJob({ jobId }: { jobId: string }) {
       )}
 
       <div className="no-scrollbar mt-5 flex gap-2 overflow-x-auto">
-        {([["review", `To review · ${lists.review.length}`], ["committed", `Imported · ${lists.committed.length}`], ["skipped", `Skipped · ${lists.skipped.length}`], ["failed", `Failed · ${lists.failed.length}`]] as const).map(([k, label]) => (
+        {([["people", "People"], ["review", `Notes · ${lists.review.length}`], ["committed", `Imported · ${lists.committed.length}`], ["skipped", `Skipped · ${lists.skipped.length}`], ["failed", `Failed · ${lists.failed.length}`]] as const).map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)} className={cn("pressable shrink-0 rounded-full px-3.5 py-1.5 text-[13.5px] font-medium", tab === k ? "bg-accent text-accent-fg" : "glass text-fg-2")}>{label}</button>
         ))}
         {tab === "review" && highConf > 0 && (
@@ -115,13 +116,15 @@ export function ImportJob({ jobId }: { jobId: string }) {
         )}
       </div>
 
-      <div className="mt-4 space-y-3">
-        {lists[tab].length === 0 && (
+      {tab === "people" && <div className="mt-4"><ImportPeople jobId={jobId} onCommitted={() => refetch()} /></div>}
+
+      <div className={cn("mt-4 space-y-3", tab === "people" && "hidden")}>
+        {tab !== "people" && lists[tab].length === 0 && (
           <GlassCard className="text-center text-[14px] text-fg-2">
             {tab === "review" ? (running ? "Items appear here as they are extracted." : "Nothing left to review 🎉") : "Nothing here."}
           </GlassCard>
         )}
-        {lists[tab].map((it) => (
+        {tab !== "people" && lists[tab].map((it) => (
           <ImportItemCard key={it.id} item={it} mode={tab} onCommit={(decision) => act.mutate({ itemId: it.id, action: "commit", decision })} onSkip={() => act.mutate({ itemId: it.id, action: "skip" })} onReopen={() => { started.current = false; act.mutate({ itemId: it.id, action: "reopen" }); }} busy={act.isPending} />
         ))}
       </div>

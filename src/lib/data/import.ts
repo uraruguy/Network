@@ -259,6 +259,10 @@ export async function commitItem(ownerId: string, itemId: string, decision: Deci
     if (!c || d.action === "skip") continue;
     const home = await geocode(d.city ?? c.city, c.country);
     const categoryIds = (d.categories ?? c.categories).map((s) => catId(s)).filter((x): x is string => !!x);
+    if (d.action === "create") {
+      const dup = await db.query.people.findFirst({ where: and(eq(people.ownerId, ownerId), isNull(people.deletedAt), sql`lower(unaccent(${people.displayName})) = lower(unaccent(${d.name ?? c.name}))`), columns: { id: true } });
+      if (dup) { d.action = "merge"; d.personId = dup.id; }
+    }
     if (d.action === "merge" && d.personId) {
       const existing = await db.query.people.findFirst({ where: and(eq(people.ownerId, ownerId), eq(people.id, d.personId)), with: { categories: true } });
       if (!existing) continue;
@@ -385,3 +389,117 @@ export async function bulkCommitHighConfidence(ownerId: string, jobId: string, m
 }
 
 export { inArray };
+
+/* ------------------------------------------------------------------ */
+/*  People-first review: aggregate candidates across a job by name     */
+/* ------------------------------------------------------------------ */
+
+export const nameKey = (name: string) => norm(name);
+
+export type AggregatedPerson = {
+  key: string;
+  name: string;
+  aliases: string[];
+  mentions: number;
+  items: { id: string; title: string | null; date: string | null; index: number; confidence: number }[];
+  cities: string[];
+  roles: string[];
+  companies: string[];
+  categories: Record<string, number>;
+  hobbies: string[];
+  followUps: number;
+  keyFacts: string[];
+  matchPersonId: string | null;
+  matchName: string | null;
+  confidence: number;
+};
+
+export async function aggregatePeople(ownerId: string, jobId: string): Promise<AggregatedPerson[]> {
+  const items = await db.query.importItems.findMany({
+    where: and(eq(importItems.ownerId, ownerId), eq(importItems.jobId, jobId), eq(importItems.status, "extracted")),
+    columns: { id: true, title: true, externalCreatedAt: true, candidates: true },
+  });
+  const existing = await db.query.people.findMany({ where: and(eq(people.ownerId, ownerId), isNull(people.deletedAt)), columns: { id: true, displayName: true } });
+  const map = new Map<string, AggregatedPerson>();
+  for (const it of items) {
+    const ex = it.candidates as StoredExtraction | null;
+    ex?.candidates.forEach((c, index) => {
+      const key = nameKey(c.name);
+      if (!key) return;
+      const agg = map.get(key) ?? {
+        key, name: c.name, aliases: [], mentions: 0, items: [], cities: [], roles: [], companies: [], categories: {}, hobbies: [], followUps: 0, keyFacts: [], matchPersonId: null, matchName: null, confidence: 0,
+      };
+      agg.mentions++;
+      agg.items.push({ id: it.id, title: it.title, date: it.externalCreatedAt?.toISOString() ?? null, index, confidence: c.confidence });
+      if (c.name.length > agg.name.length) agg.name = c.name; // prefer the fullest spelling
+      for (const a of [c.name, ...c.aliases]) if (!agg.aliases.includes(a) && a !== agg.name) agg.aliases.push(a);
+      if (c.city && !agg.cities.includes(c.city)) agg.cities.push(c.city);
+      if (c.role && !agg.roles.includes(c.role)) agg.roles.push(c.role);
+      if (c.company && !agg.companies.includes(c.company)) agg.companies.push(c.company);
+      for (const k of c.categories) agg.categories[k] = (agg.categories[k] ?? 0) + 1;
+      for (const h of c.hobbies) if (!agg.hobbies.includes(h)) agg.hobbies.push(h);
+      agg.followUps += c.followUps.length;
+      for (const f of c.keyFacts) if (agg.keyFacts.length < 6 && !agg.keyFacts.includes(f)) agg.keyFacts.push(f);
+      agg.confidence = Math.max(agg.confidence, c.confidence);
+      map.set(key, agg);
+    });
+  }
+  for (const agg of map.values()) {
+    const m = matchPerson(agg.name, existing);
+    agg.matchPersonId = m?.id ?? null;
+    agg.matchName = m?.displayName ?? null;
+    agg.aliases = agg.aliases.filter((a) => nameKey(a) !== agg.key).slice(0, 4);
+  }
+  return [...map.values()].sort((a, b) => b.mentions - a.mentions || b.confidence - a.confidence);
+}
+
+export const peopleDecisionSchema = z.record(
+  z.string(),
+  z.object({
+    action: z.enum(["create", "merge", "skip"]),
+    personId: z.string().uuid().nullish(),
+    name: z.string().min(1).optional(),
+    city: z.string().nullish(),
+    categories: z.array(z.string()).optional(),
+  }),
+);
+export type PeopleDecisions = z.infer<typeof peopleDecisionSchema>;
+
+/**
+ * Commits every extracted item whose candidates are all decided, deriving the per-item decision
+ * from the per-person choices. People created for one note are reused by later notes (name match).
+ */
+export async function commitByPeople(ownerId: string, jobId: string, decisions: PeopleDecisions, limit = 40) {
+  const items = await db.query.importItems.findMany({
+    where: and(eq(importItems.ownerId, ownerId), eq(importItems.jobId, jobId), eq(importItems.status, "extracted")),
+    orderBy: [asc(importItems.externalCreatedAt)],
+  });
+  let committed = 0, remaining = 0;
+  for (const it of items) {
+    const ex = it.candidates as StoredExtraction | null;
+    const cands = ex?.candidates ?? [];
+    if (!cands.length) continue;
+    const decided = cands.map((c) => decisions[nameKey(c.name)]);
+    if (decided.some((d) => !d)) { remaining++; continue; }
+    if (committed >= limit) { remaining++; continue; }
+    // Re-resolve merges against people created by earlier commits in this run.
+    const existing = await db.query.people.findMany({ where: and(eq(people.ownerId, ownerId), isNull(people.deletedAt)), columns: { id: true, displayName: true } });
+    const decision: Decision = {
+      candidates: cands.map((c, index) => {
+        const d = decided[index]!;
+        if (d.action === "skip") return { index, action: "skip" as const };
+        const byName = existing.find((p) => nameKey(p.displayName) === nameKey(d.name ?? c.name));
+        if (d.action === "merge" && d.personId) return { index, action: "merge" as const, personId: d.personId, city: d.city, categories: d.categories };
+        if (byName) return { index, action: "merge" as const, personId: byName.id, city: d.city, categories: d.categories };
+        return { index, action: "create" as const, name: d.name ?? c.name, city: d.city, categories: d.categories };
+      }),
+      primaryIndex: cands.findIndex((c) => decided[cands.indexOf(c)]!.action !== "skip") >= 0 ? cands.findIndex((c) => decided[cands.indexOf(c)]!.action !== "skip") : null,
+      createReminders: true,
+      noteKind: it.classification === "meeting" ? "meeting" : "note",
+    };
+    if (decision.primaryIndex === null) { await db.update(importItems).set({ status: "skipped" }).where(eq(importItems.id, it.id)); continue; }
+    await commitItem(ownerId, it.id, decision);
+    committed++;
+  }
+  return { committed, remaining };
+}
