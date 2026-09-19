@@ -14,7 +14,8 @@
     "notes:export": "tsx scripts/apple-notes/export.ts",
     "dev:cloud": "dotenv run -f .env.cloud.local --override -q -- concurrently -p none \"serwist build --watch\" \"next dev -p 3100\"",
     "notes:import": "dotenv run -f .env.cloud.local --override -q -- tsx scripts/import-cli.ts .cache/notes-export.clean.json --label \"Apple Notes\"",
-    "notes:clean": "python3 scripts/apple-notes/clean.py"
+    "notes:clean": "python3 scripts/apple-notes/clean.py",
+    "notes:resume": "dotenv run -f .env.cloud.local --override -q -- tsx scripts/import-cli.ts --resume"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.56",

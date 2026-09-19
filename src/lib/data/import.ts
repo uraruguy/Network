@@ -65,8 +65,10 @@ export async function createImportJob(ownerId: string, rows: ExportRow[], label?
       .onConflictDoUpdate({
         target: [importItems.ownerId, importItems.externalId],
         set: { jobId: job!.id, title: r.title, html: r.html, text, folder: r.folder, externalModifiedAt: r.modified ? new Date(r.modified) : null, contentHash: h, status: "pending", classification: null, candidates: null, decision: null, error: null },
+        // Only re-stage a note whose content actually changed; in-progress work on unchanged notes is kept.
+        setWhere: sql`${importItems.contentHash} is distinct from excluded.content_hash`,
       });
-    added++;
+    if (!prev || prev.contentHash !== h) added++;
   }
   await db.update(importJobs).set({ totalItems: added }).where(eq(importJobs.id, job!.id));
   return { ...job!, totalItems: added };
@@ -97,9 +99,9 @@ export async function deleteJob(ownerId: string, jobId: string) {
 /*  AI passes                                                          */
 /* ------------------------------------------------------------------ */
 
-export async function classifyNext(ownerId: string, jobId: string, batch = 20) {
+export async function classifyNext(ownerId: string, jobId: string | null, batch = 20) {
   const items = await db.query.importItems.findMany({
-    where: and(eq(importItems.ownerId, ownerId), eq(importItems.jobId, jobId), eq(importItems.status, "pending")),
+    where: and(eq(importItems.ownerId, ownerId), jobId ? eq(importItems.jobId, jobId) : undefined, eq(importItems.status, "pending")),
     orderBy: [asc(importItems.createdAt)],
     limit: batch,
     columns: { id: true, title: true, text: true, folder: true },
@@ -122,7 +124,7 @@ export async function classifyNext(ownerId: string, jobId: string, batch = 20) {
   } catch (e) {
     for (const it of items) await db.update(importItems).set({ status: "failed", error: (e as Error).message }).where(eq(importItems.id, it.id));
   }
-  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(importItems).where(and(eq(importItems.jobId, jobId), eq(importItems.status, "pending")));
+  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(importItems).where(and(eq(importItems.ownerId, ownerId), jobId ? eq(importItems.jobId, jobId) : undefined, eq(importItems.status, "pending")));
   return { processed: items.length, remaining: n ?? 0 };
 }
 
@@ -149,9 +151,9 @@ function matchPerson(name: string, existing: { id: string; displayName: string }
   return null;
 }
 
-export async function extractNext(ownerId: string, jobId: string, concurrency = 3) {
+export async function extractNext(ownerId: string, jobId: string | null, concurrency = 3) {
   const items = await db.query.importItems.findMany({
-    where: and(eq(importItems.ownerId, ownerId), eq(importItems.jobId, jobId), eq(importItems.status, "classified")),
+    where: and(eq(importItems.ownerId, ownerId), jobId ? eq(importItems.jobId, jobId) : undefined, eq(importItems.status, "classified")),
     orderBy: [asc(importItems.createdAt)],
     limit: concurrency,
   });
@@ -183,7 +185,7 @@ export async function extractNext(ownerId: string, jobId: string, concurrency = 
       }
     }),
   );
-  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(importItems).where(and(eq(importItems.jobId, jobId), eq(importItems.status, "classified")));
+  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(importItems).where(and(eq(importItems.ownerId, ownerId), jobId ? eq(importItems.jobId, jobId) : undefined, eq(importItems.status, "classified")));
   return { processed: items.length, remaining: n ?? 0 };
 }
 
