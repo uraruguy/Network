@@ -8,22 +8,23 @@
  * "Terminal wants access to control Notes" → Allow.
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const folder = process.argv[2];
 const script = join(process.cwd(), "scripts/apple-notes/export.js");
 const outDir = join(process.cwd(), ".cache");
 mkdirSync(outDir, { recursive: true });
+const outFile = join(outDir, "notes-export.json");
 
 console.log(folder ? `Exporting folder "${folder}"…` : "Exporting all notes… (Notes.app will open)");
 const t0 = Date.now();
 let raw: string;
 try {
-  raw = execFileSync("osascript", ["-l", "JavaScript", script, ...(folder ? [folder] : [])], {
+  raw = execFileSync("osascript", ["-l", "JavaScript", script, outFile, ...(folder ? [folder] : [])], {
     encoding: "utf8",
-    maxBuffer: 1024 * 1024 * 1024,
-    stdio: ["ignore", "pipe", "pipe"],
+    maxBuffer: 64 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "inherit"],
   });
 } catch (e) {
   const err = e as { stderr?: string; message: string };
@@ -36,9 +37,9 @@ try {
 }
 
 type Row = { id: string; title: string; html: string | null; text: string | null; created: string | null; modified: string | null; folder: string; account: string; locked: boolean };
-const rows = JSON.parse(raw) as Row[];
-const outFile = join(outDir, "notes-export.json");
-writeFileSync(outFile, JSON.stringify(rows, null, 2));
+const summary = JSON.parse(raw) as { notes: number; locked: number; errors: string[] };
+const rows = JSON.parse(readFileSync(outFile, "utf8")) as Row[];
+if (summary.errors.length) console.error("Folders that failed:", summary.errors);
 
 const locked = rows.filter((r) => r.locked).length;
 const byFolder = rows.reduce<Record<string, number>>((acc, r) => ((acc[r.folder] = (acc[r.folder] ?? 0) + 1), acc), {});
