@@ -37,8 +37,10 @@ Heavy AI work (importing hundreds of notes with Opus) runs on your subscription 
 ## Import your Apple Notes
 ```bash
 pnpm notes:export            # exports every note to .cache/notes-export.json (allow Terminal → Notes)
+pnpm notes:clean             # strips inline base64 images (hundreds of MB → a few MB)
+pnpm notes:import            # headless classify + extract into the cloud DB (uses .env.cloud.local)
 ```
-Then Settings → Import → drop the file. Claude classifies each note (person / meeting / list / not about people), extracts people with how-you-met, city, categories, hobbies, follow-ups, and you approve or merge each one. Originals are preserved verbatim as the first note.
+Then review at /import in the app (or drop the clean JSON there instead of running notes:import). Claude classifies each note (person / meeting / list / not about people), extracts people with how-you-met, city, categories, hobbies, follow-ups, and you approve or merge each one. Originals are preserved verbatim as the first note.
 
 ## "Send to The Network" iPhone Shortcut
 Create a Shortcut with these actions and enable **Show in Share Sheet** (accepts Text):
