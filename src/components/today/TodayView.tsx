@@ -13,6 +13,7 @@ import { usePeople } from "@/lib/queries/people";
 import { useProfile } from "@/lib/queries/misc";
 import { useReminders } from "@/lib/queries/reminders";
 import { useNow } from "@/lib/hooks";
+import { Capture } from "./Capture";
 
 function greeting(now: number, name?: string | null) {
   const h = new Date(now).getHours();
@@ -50,7 +51,9 @@ export function TodayView() {
         }
       />
 
-      <div className="grid grid-cols-3 gap-2 sm:gap-3">
+      <Capture />
+
+      <div className="mt-5 grid grid-cols-3 gap-2 sm:gap-3">
         <Stat href="/people" icon={Users} label="People" value={people.length} />
         <Stat href="/globe" icon={Globe2} label="Cities" value={new Set(people.map((p) => p.homeLocationId).filter(Boolean)).size} />
         <Stat href="/today" icon={Bell} label="Due today" value={due.length} accent={due.length > 0} />
