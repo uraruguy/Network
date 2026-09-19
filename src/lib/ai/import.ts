@@ -26,7 +26,7 @@ export async function extractNote(input: { title: string | null; text: string; h
     model: await aiModel(),
     system: SYSTEM,
     output: Output.object({ schema: extractionSchema, name: "extraction" }),
-    maxOutputTokens: 6000,
+    maxOutputTokens: 12000,
     prompt: `Extract the people from this Apple Note into structured candidates. One candidate per real person Jakob would want as a contact card. Skip Jakob himself, companies, and people mentioned only in passing with nothing memorable.
 - metContext: how/where/when Jakob met them — in his own words if present.
 - categories: mentor (someone Jakob learns from / wants as mentor), friend, partner (business partner / colleague on a project), investor (VC/angel), client, founder (peer founder), acquaint.
