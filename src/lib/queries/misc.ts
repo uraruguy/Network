@@ -38,3 +38,7 @@ export function useUpdateProfile() {
 export function cityToLocation(c: City): LocationInput {
   return { cityId: c.id, name: c.name, admin: c.admin, country: c.country, countryCode: c.countryCode, lat: c.lat, lng: c.lng, timezone: c.timezone };
 }
+
+export function useGraph() {
+  return useQuery({ queryKey: ["graph"], queryFn: () => api.get<{ nodes: import("@/lib/data/graph").GraphNode[]; links: import("@/lib/data/graph").GraphLink[] }>("/api/graph") });
+}

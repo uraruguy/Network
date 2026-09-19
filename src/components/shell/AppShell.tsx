@@ -10,7 +10,7 @@ import { Hydrated } from "./Hydrated";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isGlobe = pathname.startsWith("/globe");
+  const isGlobe = pathname.startsWith("/globe") || pathname.startsWith("/graph");
 
   return (
     <div className="flex min-h-dvh">
@@ -25,7 +25,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
           <nav className="flex flex-col gap-1">
             {NAV.map((item) => {
-              const active = pathname.startsWith(item.href);
+              const active = pathname.startsWith(item.href) || (item.href === "/globe" && pathname.startsWith("/graph"));
               return (
                 <Link
                   key={item.href}
@@ -70,7 +70,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <nav className="lg:hidden fixed inset-x-0 bottom-0 z-30 px-3 pb-[max(10px,var(--sab))]">
         <div className="glass-strong specular mx-auto flex h-[64px] max-w-[520px] items-center justify-around rounded-[28px] px-2">
           {NAV.map((item) => {
-            const active = pathname.startsWith(item.href);
+            const active = pathname.startsWith(item.href) || (item.href === "/globe" && pathname.startsWith("/graph"));
             return (
               <Link
                 key={item.href}

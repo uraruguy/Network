@@ -17,13 +17,20 @@ import { CircleBadge } from "./CirclePicker";
 import { HobbyChips } from "./HobbyPicker";
 import { EditPersonSheet } from "./PersonSheet";
 import { NoteRow } from "@/components/notes/NoteRow";
+import { ReminderSheet } from "./ReminderSheet";
+import { ReminderRow } from "./ReminderRow";
+import { useReminders } from "@/lib/queries/reminders";
+import { useSearchParams } from "next/navigation";
 
 export function PersonDetail({ id, initial }: { id: string; initial?: PersonDetailT }) {
   const router = useRouter();
   const { data: p, isPending, error } = usePerson(id);
   const person = p ?? initial;
+  const searchParams = useSearchParams();
   const [edit, setEdit] = useState(false);
   const [menu, setMenu] = useState(false);
+  const [reminder, setReminder] = useState(() => searchParams.get("reminder") === "1");
+  const { data: reminders = [] } = useReminders({ personId: id });
   const del = useDeletePerson();
   const createNote = useCreateNote();
   const [, tick] = useState(0);
@@ -109,7 +116,7 @@ export function PersonDetail({ id, initial }: { id: string; initial?: PersonDeta
           <GlassButton variant="primary" onClick={newNote} disabled={createNote.isPending}>
             <Plus size={18} strokeWidth={2.5} /> Note
           </GlassButton>
-          <GlassButton onClick={() => router.push(`/people/${person.id}?reminder=1`)}>
+          <GlassButton onClick={() => setReminder(true)}>
             <Bell size={17} /> Follow up
           </GlassButton>
           <GlassButton onClick={() => router.push(`/chat?person=${person.id}`)}>
@@ -133,6 +140,20 @@ export function PersonDetail({ id, initial }: { id: string; initial?: PersonDeta
             )}
           </div>
         </GlassCard>
+      )}
+
+      {/* Follow-ups */}
+      {reminders.length > 0 && (
+        <section>
+          <h2 className="mb-2 px-1 text-[13px] font-semibold uppercase tracking-wide text-fg-3">Follow-ups</h2>
+          <GlassCard padded={false} className="p-1.5">
+            <ul className="divide-y divide-[var(--glass-border-2)]">
+              {reminders.map((r) => (
+                <li key={r.id}><ReminderRow r={r} showPerson={false} /></li>
+              ))}
+            </ul>
+          </GlassCard>
+        </section>
       )}
 
       {/* Notes */}
@@ -209,6 +230,7 @@ export function PersonDetail({ id, initial }: { id: string; initial?: PersonDeta
       <p className="px-1 text-center text-[12px] text-fg-4">Added {formatDate(person.createdAt)}{person.sourceKind === "apple-notes" ? " · imported from Apple Notes" : ""}</p>
 
       <EditPersonSheet person={person} open={edit} onClose={() => setEdit(false)} />
+      <ReminderSheet personId={person.id} personName={person.displayName.split(" ")[0] ?? person.displayName} open={reminder} onClose={() => setReminder(false)} />
       <GlassSheet open={menu} onClose={() => setMenu(false)} title={person.displayName} width={420}>
         <div className="space-y-2 pb-2">
           <GlassButton className="w-full justify-start" onClick={() => { setMenu(false); setEdit(true); }}><Pencil size={16} /> Edit details</GlassButton>

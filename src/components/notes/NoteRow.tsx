@@ -17,7 +17,7 @@ export function NoteRow({ note, href, person }: { note: { id: string; title: str
       <p className="mt-0.5 line-clamp-2 text-[13.5px] text-fg-2">
         {person && <span className="font-medium text-fg">{person.displayName} · </span>}
         {KIND_LABEL[note.kind] && <span className="text-accent-strong">{KIND_LABEL[note.kind]} · </span>}
-        {snippet || <span className="text-fg-4">Empty note</span>}
+        {snippet || (note.title || note.contentText ? null : <span className="text-fg-4">Empty note</span>)}
       </p>
     </Link>
   );

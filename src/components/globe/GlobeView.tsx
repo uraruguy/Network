@@ -10,6 +10,7 @@ import { Chip } from "@/components/glass/Chip";
 import { CategoryIcon } from "@/components/people/CategoryIcon";
 import { WarmthDot } from "@/components/people/WarmthPicker";
 import { WARMTH, type Warmth } from "@/lib/db/schema";
+import { ViewSwitch } from "./ViewSwitch";
 import { useGlobe, useProfile } from "@/lib/queries/misc";
 import { useCategories } from "@/lib/queries/people";
 import { cn, flag, WARMTH_META } from "@/lib/utils";
@@ -103,14 +104,18 @@ export function GlobeView() {
               {totalPeople} {totalPeople === 1 ? "person" : "people"} · {filtered.length} {filtered.length === 1 ? "city" : "cities"} · {countries} {countries === 1 ? "country" : "countries"}
             </p>
           </div>
-          <button
-            onClick={() => setArcs((a) => !a)}
-            className={cn("pointer-events-auto pressable glass specular grid h-11 w-11 place-items-center rounded-full", arcs ? "text-accent-strong" : "text-fg-3")}
-            aria-label="Toggle arcs from home"
-            title="Arcs from home base"
-          >
-            <Route size={18} />
-          </button>
+          <ViewSwitch
+            trailing={
+              <button
+                onClick={() => setArcs((a) => !a)}
+                className={cn("pressable glass specular grid h-11 w-11 place-items-center rounded-full", arcs ? "text-accent-strong" : "text-fg-3")}
+                aria-label="Toggle arcs from home"
+                title="Arcs from home base"
+              >
+                <Route size={18} />
+              </button>
+            }
+          />
         </div>
         <div className="pointer-events-auto no-scrollbar mt-3 flex gap-2 overflow-x-auto pb-1">
           {cats.map((c) => (
