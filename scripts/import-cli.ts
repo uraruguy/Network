@@ -35,7 +35,9 @@ async function main() {
     jobId = job.id;
     console.log(`job ${job.id}: ${job.totalItems} new/changed notes (of ${rows.length})`);
   } else {
-    console.log("resuming unfinished items across all jobs");
+    const { retryFailed } = await import("../src/lib/data/import");
+    await retryFailed(profile.id, null);
+    console.log("resuming unfinished + failed items across all jobs");
   }
 
   let t0 = Date.now();

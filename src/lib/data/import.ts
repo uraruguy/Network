@@ -189,8 +189,11 @@ export async function extractNext(ownerId: string, jobId: string | null, concurr
   return { processed: items.length, remaining: n ?? 0 };
 }
 
-export async function retryFailed(ownerId: string, jobId: string) {
-  await db.update(importItems).set({ status: "pending", error: null }).where(and(eq(importItems.ownerId, ownerId), eq(importItems.jobId, jobId), eq(importItems.status, "failed")));
+/** Failed items go back to the last completed stage: classified ones only redo extraction. */
+export async function retryFailed(ownerId: string, jobId: string | null) {
+  const scope = and(eq(importItems.ownerId, ownerId), jobId ? eq(importItems.jobId, jobId) : undefined, eq(importItems.status, "failed"));
+  await db.update(importItems).set({ status: "classified", error: null }).where(and(scope, sql`${importItems.classification} is not null and ${importItems.classification} <> 'not_people'`));
+  await db.update(importItems).set({ status: "pending", error: null }).where(scope);
 }
 
 /* ------------------------------------------------------------------ */
