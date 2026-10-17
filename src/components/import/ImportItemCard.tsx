@@ -8,6 +8,7 @@ import { GlassInput } from "@/components/glass/GlassInput";
 import { CategoryIcon } from "@/components/people/CategoryIcon";
 import type { Decision, StoredExtraction } from "@/lib/data/import";
 import type { ImportItemRow } from "@/lib/queries/import";
+import { useImportItem } from "@/lib/queries/import-review";
 import { useCategories, usePeople } from "@/lib/queries/people";
 import { cn, formatDate } from "@/lib/utils";
 
@@ -20,6 +21,7 @@ export function ImportItemCard({ item, mode, onCommit, onSkip, onReopen, busy }:
   const { data: cats = [] } = useCategories();
   const { data: people = [] } = usePeople();
   const [showNote, setShowNote] = useState(false);
+  const { data: full, isLoading: noteLoading } = useImportItem(showNote ? item.id : null);
   const [primary, setPrimary] = useState(0);
   const [rows, setRows] = useState<Row[]>(() =>
     (ex?.candidates ?? []).map((c) => ({ action: c.matchPersonId ? "merge" : "create", personId: c.matchPersonId, name: c.name, city: c.city ?? "", categories: c.categories })),
@@ -66,7 +68,7 @@ export function ImportItemCard({ item, mode, onCommit, onSkip, onReopen, busy }:
       </button>
       {showNote && (
         <div className="mt-2 max-h-72 overflow-y-auto rounded-[12px] bg-fg/4 p-3 text-[13.5px] leading-relaxed [&_h1]:text-[16px] [&_h1]:font-semibold [&_ul]:list-disc [&_ul]:pl-5 [&_a]:text-accent-strong">
-          {item.html ? <div dangerouslySetInnerHTML={{ __html: item.html }} /> : <pre className="whitespace-pre-wrap font-sans">{item.text}</pre>}
+          {noteLoading ? <p className="text-fg-3">Loading…</p> : full?.html ? <div dangerouslySetInnerHTML={{ __html: full.html }} /> : <pre className="whitespace-pre-wrap font-sans">{full?.text}</pre>}
         </div>
       )}
 
