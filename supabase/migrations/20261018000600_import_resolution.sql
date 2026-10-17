@@ -22,8 +22,11 @@ alter table import_items
 
 update import_items i set source = j.source from import_jobs j where j.id = i.job_id and i.source is distinct from j.source;
 update import_items set folders = array[folder] where folder is not null and folder <> '' and folders = '{}'::text[];
-update import_items set screened_with = 'head700:openrouter' where status = 'skipped' and screened_with is null;
-update import_items set dismissed_reason = 'screen:not_people' where status = 'skipped' and dismissed_reason is null;
+-- Skips by the first run's screen (700-char head, OpenRouter) vs. notes Jakob skipped by hand in the old review UI.
+update import_items set screened_with = 'head700:openrouter'
+ where status = 'skipped' and screened_with is null and coalesce(classification, 'not_people') = 'not_people';
+update import_items set dismissed_reason = case when coalesce(classification, 'not_people') = 'not_people' then 'screen:not_people' else 'user:skipped' end
+ where status = 'skipped' and dismissed_reason is null;
 update import_items set extraction_version = 1 where candidates ? 'candidates' and extraction_version is null;
 -- Old-flow commits recorded the note id inside decision.
 update import_items set note_id = (decision->>'noteId')::uuid

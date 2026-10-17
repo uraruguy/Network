@@ -3,7 +3,8 @@
  *   pnpm tsx scripts/import/run-stage.ts --stage screen  [--limit 600] [--no-rescreen] [--write]
  *   pnpm tsx scripts/import/run-stage.ts --stage extract [--limit 400] [--concurrency 3] [--write]
  * Options: --provider agent-sdk|anthropic|openrouter (paid ones need --allow-paid), --model opus,
- *          --fast-model sonnet, --retry-failed (requeue failed items first), --ids a,b (only these items).
+ *          --fast-model sonnet, --retry-failed (requeue failed items first), --ids a,b (only these items),
+ *          --requeue-truncated (extract: re-extract v1 notes longer than 12k chars, which v1 truncated).
  * Without --write it only lists what would be processed. Resumable: work is selected by status, and
  * a rate/usage limit stops the run cleanly (exit 2) — just run it again later.
  *
@@ -33,6 +34,10 @@ run(async () => {
   const ids = ctx.args.opts("--ids");
   const limit = Number(ctx.args.opt("--limit", "1000"));
   if (ctx.args.flag("--retry-failed") && ctx.write) console.log(`requeued ${await st.requeueFailed(db, owner.id, ctx.source)} failed items`);
+  if (stage === "extract" && ctx.args.flag("--requeue-truncated") && ctx.write) {
+    const r = await st.requeueTruncated(db, owner.id, ctx.source);
+    console.log(`requeued ${r.length} truncated v1 extractions: ${r.map((x) => x.title).join(", ")}`);
+  }
   console.log("before:", await st.stageCounts(db, owner.id, ctx.source));
   const log: Record<string, unknown>[] = [];
   let stoppedByLimit = false;

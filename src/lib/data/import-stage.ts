@@ -97,6 +97,27 @@ export async function requeueFailed(db: DbOrTx, ownerId: string, source: string)
   return a.length + b.length;
 }
 
+/**
+ * v1 extractions read only the first 12k chars. Long notes go back to `classified` so the v2
+ * extractor (chunked) sees all of them — only while they have no resolved mentions yet.
+ */
+export async function requeueTruncated(db: DbOrTx, ownerId: string, source: string, maxChars = 12000) {
+  const rows = await db
+    .update(importItemsX)
+    .set({ status: "classified", candidates: null, extractionVersion: null })
+    .where(
+      and(
+        base(ownerId, source),
+        eq(importItemsX.status, "extracted"),
+        sql`coalesce(${importItemsX.extractionVersion}, 1) < 2`,
+        sql`length(${importItemsX.text}) > ${maxChars}`,
+        sql`not exists (select 1 from import_mentions m where m.item_id = ${importItemsX.id})`,
+      ),
+    )
+    .returning({ id: importItemsX.id, title: importItemsX.title });
+  return rows;
+}
+
 export async function existingPeopleNames(db: DbOrTx, ownerId: string) {
   const rows = await db
     .select({ name: schema.people.displayName })

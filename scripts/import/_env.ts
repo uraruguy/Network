@@ -69,7 +69,7 @@ export function parseArgs(argv = process.argv.slice(2)): Args {
 /** Flags that never take a value (so a following positional is not swallowed). */
 const BOOLEAN_FLAGS = new Set([
   "--write", "--yes-prod", "--dry-run", "--force", "--all", "--json", "--allow-paid", "--include-decided",
-  "--retry-failed", "--rescreen", "--no-rescreen", "--emit", "--list", "--target-local", "--quiet", "--no-ai", "--verbose", "--fail-fast", "--keep",
+  "--retry-failed", "--rescreen", "--no-rescreen", "--emit", "--requeue-truncated", "--list", "--target-local", "--quiet", "--no-ai", "--verbose", "--fail-fast", "--keep",
 ]);
 
 export type Ctx = {
