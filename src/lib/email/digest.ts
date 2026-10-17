@@ -1,19 +1,33 @@
 import type { ReminderWithPerson } from "@/lib/data/reminders";
 import { actionUrl } from "@/lib/signing";
 
-type Birthday = { id: string; displayName: string; birthday: string; inDays: number };
+export type DigestBirthday = { id: string; displayName: string; birthday: string; inDays: number; /** Age they turn (null when the year is unknown). */ turning?: number | null };
+type Birthday = DigestBirthday;
+
+export type DigestParts = { base: string; name: string; dateLabel: string; due: ReminderWithPerson[]; overdue: ReminderWithPerson[]; birthdays: Birthday[] };
+
+const when = (inDays: number) => (inDays === 0 ? "today" : inDays === 1 ? "tomorrow" : `in ${inDays} days`);
+const birthdayLine = (b: Birthday) => (b.turning ? `turns ${b.turning} ${when(b.inDays)}` : `birthday ${when(b.inDays)}`);
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
+/** "Dr. Ingo Kiedaisch" → "Ingo": the first word that isn't a title/initial. */
+const firstName = (name: string) => {
+  const words = name.trim().split(/\s+/);
+  return words.find((w) => !w.endsWith(".")) ?? words[0] ?? name;
+};
+
 export function digestSubject(due: ReminderWithPerson[], birthdays: Birthday[]) {
-  const names = due.slice(0, 3).map((r) => r.person.displayName.split(" ")[0]);
-  const more = due.length > 3 ? ` +${due.length - 3}` : "";
+  // One name per person, even with several reminders for them.
+  const people = [...new Map(due.map((r) => [r.person.id, firstName(r.person.displayName)])).values()];
+  const names = people.slice(0, 3);
+  const more = people.length > 3 ? ` +${people.length - 3}` : "";
   if (due.length) return `Follow up today: ${names.join(", ")}${more}`;
   if (birthdays.length) return `Birthday soon: ${birthdays[0]!.displayName}`;
   return "The Network — today";
 }
 
-export function digestHtml(opts: { base: string; name: string; dateLabel: string; due: ReminderWithPerson[]; overdue: ReminderWithPerson[]; birthdays: Birthday[] }) {
+export function digestHtml(opts: DigestParts) {
   const { base, name, dateLabel, due, overdue, birthdays } = opts;
   const row = (r: ReminderWithPerson, late: boolean) => `
     <tr><td style="padding:14px 0;border-top:1px solid rgba(11,36,38,0.08)">
@@ -31,7 +45,7 @@ export function digestHtml(opts: { base: string; name: string; dateLabel: string
 
   const section = (title: string, rows: string) => rows ? `<tr><td style="padding:22px 0 6px;font:600 12px -apple-system,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#7a9295">${title}</td></tr>${rows}` : "";
 
-  const bday = birthdays.map((b) => `<tr><td style="padding:10px 0;border-top:1px solid rgba(11,36,38,0.08);font:400 14px -apple-system,sans-serif;color:#0b2426">🎂 <a href="${base}/people/${b.id}" style="color:#0b2426;font-weight:600;text-decoration:none">${esc(b.displayName)}</a> <span style="color:#3f5a5c">${b.inDays === 0 ? "today" : b.inDays === 1 ? "tomorrow" : `in ${b.inDays} days`}</span></td></tr>`).join("");
+  const bday = birthdays.map((b) => `<tr><td style="padding:10px 0;border-top:1px solid rgba(11,36,38,0.08);font:400 14px -apple-system,sans-serif;color:#0b2426">🎂 <a href="${base}/people/${b.id}" style="color:#0b2426;font-weight:600;text-decoration:none">${esc(b.displayName)}</a> <span style="color:#3f5a5c">${birthdayLine(b)}</span></td></tr>`).join("");
 
   return `<!doctype html><html><body style="margin:0;background:#f4fbfb;padding:24px 12px">
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center">
@@ -43,6 +57,25 @@ export function digestHtml(opts: { base: string; name: string; dateLabel: string
     ${section("Overdue", overdue.map((r) => row(r, true)).join(""))}
     ${section("Today", due.map((r) => row(r, false)).join(""))}
     ${section("Birthdays this week", bday)}
-    <tr><td style="padding-top:24px;font:400 12px -apple-system,sans-serif;color:#a9bcbe">Sent by <a href="${base}/today" style="color:#0a949a;text-decoration:none">The Network</a>. Change the time or turn this off in Settings.</td></tr>
+    <tr><td style="padding-top:24px;font:400 12px -apple-system,sans-serif;color:#a9bcbe">Sent by <a href="${base}/today" style="color:#0a949a;text-decoration:none">The Network</a>. Change the time or turn this off in <a href="${base}/settings/digest" style="color:#0a949a;text-decoration:none">Settings</a>.</td></tr>
   </table></td></tr></table></body></html>`;
+}
+
+/** The plain-text part of the digest (same content, readable in any client). */
+export function digestText({ base, name, dateLabel, due, overdue, birthdays }: DigestParts): string {
+  const lines: string[] = [`Good morning, ${name}`, `${dateLabel} · ${due.length + overdue.length} to follow up${birthdays.length ? ` · ${birthdays.length} birthday${birthdays.length > 1 ? "s" : ""}` : ""}`, ""];
+  const item = (r: ReminderWithPerson) => {
+    const who = [r.person.headline, r.person.company].filter(Boolean).join(", ");
+    return [
+      `• ${r.person.displayName}${who ? ` (${who})` : ""} — ${r.message ?? "Check in"}`,
+      `  Done: ${actionUrl(base, r.id, "done")}`,
+      `  Snooze a week: ${actionUrl(base, r.id, "snooze")}`,
+      `  Open: ${base}/people/${r.person.id}`,
+    ].join("\n");
+  };
+  if (overdue.length) lines.push("OVERDUE", ...overdue.map(item), "");
+  if (due.length) lines.push("TODAY", ...due.map(item), "");
+  if (birthdays.length) lines.push("BIRTHDAYS THIS WEEK", ...birthdays.map((b) => `• ${b.displayName} — ${birthdayLine(b)}`), "");
+  lines.push(`Sent by The Network (${base}/today). Change the time or turn this off in Settings: ${base}/settings/digest`);
+  return lines.join("\n");
 }

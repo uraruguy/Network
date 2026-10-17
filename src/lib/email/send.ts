@@ -1,15 +1,21 @@
-import { Resend } from "resend";
-import { serverEnv } from "@/lib/env";
+import "server-only";
+import { emailConfigFromEnv } from "@/lib/connections/email";
+import { getEmailTransport } from "./index";
 
+/**
+ * @deprecated v1 helpers, kept for compatibility. Use `getEmailTransport()` from `@/lib/email`
+ * (Resend or SMTP, configured from the environment or Settings → Connections).
+ */
+
+/** @deprecated Only sees environment configuration; use `getEmailTransport()` (null = not configured). */
 export function emailConfigured() {
-  return !!serverEnv().RESEND_API_KEY;
+  return emailConfigFromEnv() !== null;
 }
 
-export async function sendEmail(opts: { to: string; subject: string; html: string }) {
-  const env = serverEnv();
-  if (!env.RESEND_API_KEY) throw new Error("RESEND_API_KEY is not set");
-  const resend = new Resend(env.RESEND_API_KEY);
-  const { data, error } = await resend.emails.send({ from: env.EMAIL_FROM, to: opts.to, subject: opts.subject, html: opts.html });
-  if (error) throw new Error(error.message);
-  return data?.id;
+/** @deprecated Use `(await getEmailTransport())?.send(…)`. Throws when e-mail isn't configured. */
+export async function sendEmail(opts: { to: string; subject: string; html: string; text?: string }) {
+  const transport = await getEmailTransport();
+  if (!transport) throw new Error("E-mail is not configured (Settings → Connections, or RESEND_API_KEY / SMTP_URL)");
+  const { id } = await transport.send(opts);
+  return id ?? undefined;
 }

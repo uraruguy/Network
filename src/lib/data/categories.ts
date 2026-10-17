@@ -36,6 +36,21 @@ export async function updateCategory(ownerId: string, id: string, patch: Partial
   return row ?? null;
 }
 
+/** Sets `sort` to the position in `ids` (categories not listed keep their order after them). */
+export async function reorderCategories(ownerId: string, ids: string[]) {
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`
+      update categories c set sort = x.ord::int
+      from unnest(${sql.param(ids)}::uuid[]) with ordinality as x(id, ord)
+      where c.id = x.id and c.owner_id = ${ownerId}`);
+    await tx.execute(sql`
+      update categories c set sort = ${ids.length} + r.rn::int
+      from (select id, row_number() over (order by sort, name) as rn from categories where owner_id = ${ownerId} and not (id = any(${sql.param(ids)}::uuid[]))) r
+      where c.id = r.id`);
+  });
+  return listCategoriesWithCounts(ownerId);
+}
+
 export async function deleteCategory(ownerId: string, id: string): Promise<boolean> {
   const rows = await db.delete(categories).where(and(eq(categories.ownerId, ownerId), eq(categories.id, id))).returning({ id: categories.id });
   return rows.length > 0;
