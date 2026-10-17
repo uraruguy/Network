@@ -706,10 +706,11 @@ export function htmlIsPlainish(html: string): boolean {
 
 /**
  * Plain text from the quick composer → Markdown the editor loads. Lines stay lines (soft breaks
- * render as line breaks), blank lines separate paragraphs, ☐/☑ lines become task items.
+ * render as line breaks), blank lines separate paragraphs, ☐/☑ lines become task items. With
+ * `titleFirstLine`, a plain first line becomes the note's Title heading (as in Apple Notes).
  */
-export function plainTextToMarkdown(text: string): string {
-  return text
+export function plainTextToMarkdown(text: string, opts: { titleFirstLine?: boolean } = {}): string {
+  const lines = text
     .replace(/\r\n?/g, "\n")
     .split("\n")
     .map((line) => {
@@ -717,7 +718,17 @@ export function plainTextToMarkdown(text: string): string {
       const m = checkboxPrefix(trimmed);
       if (m && !/^\s*[-*+]\s+\[/.test(trimmed)) return `- [${m.checked ? "x" : " "}] ${trimmed.slice(m.length)}`;
       return trimmed;
-    })
+    });
+  if (opts.titleFirstLine) {
+    const first = lines.findIndex((l) => l.trim());
+    const line = lines[first];
+    // Only a plain line: lists, headings and quotes keep their own shape.
+    if (line !== undefined && !/^\s*(?:#{1,6}\s|[-*+]\s|\d{1,3}[.)]\s|>)/.test(line)) {
+      lines[first] = `# ${line.trim()}`;
+      if (lines[first + 1]?.trim()) lines.splice(first + 1, 0, ""); // the body starts as its own paragraph
+    }
+  }
+  return lines
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();

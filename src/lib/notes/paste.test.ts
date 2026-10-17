@@ -262,6 +262,12 @@ describe("markdown detection", () => {
 });
 
 describe("plainTextToMarkdown", () => {
+  it("can turn a plain first line into the Title heading", () => {
+    expect(plainTextToMarkdown("Dinner with the team\nThey loved the place", { titleFirstLine: true })).toBe("# Dinner with the team\n\nThey loved the place");
+    expect(plainTextToMarkdown("- milk\n- eggs", { titleFirstLine: true })).toBe("- milk\n- eggs");
+    expect(plainTextToMarkdown("One line", { titleFirstLine: true })).toBe("# One line");
+  });
+
   it("keeps lines, collapses blank runs and converts checkbox symbols", () => {
     expect(plainTextToMarkdown("Coffee with Ana\r\nTalked about:\n- kids\n\n\n\n☐ send link\n✓ booked  ")).toBe(
       "Coffee with Ana\nTalked about:\n- kids\n\n- [ ] send link\n- [x] booked",

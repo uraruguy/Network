@@ -73,7 +73,7 @@ export function QuickNoteComposer({ personId, personName, className }: { personI
     saveNote(
       qc,
       crypto.randomUUID(),
-      { personId, title: titleFromText(t), contentJson: null, contentMd: plainTextToMarkdown(t), contentText: t, kind, occurredAt: new Date().toISOString() },
+      { personId, title: titleFromText(t), contentJson: null, contentMd: plainTextToMarkdown(t, { titleFirstLine: true }), contentText: t, kind, occurredAt: new Date().toISOString() },
       { isNew: true, sync: true },
     );
     reset();
@@ -83,7 +83,7 @@ export function QuickNoteComposer({ personId, personName, className }: { personI
   const openInEditor = () => {
     primeKeyboard();
     const t = text.trim();
-    newNote(personId, t ? { kind, title: titleFromText(t), contentMd: plainTextToMarkdown(t), contentText: t } : { kind });
+    newNote(personId, t ? { kind, title: titleFromText(t), contentMd: plainTextToMarkdown(t, { titleFirstLine: true }), contentText: t } : { kind });
     reset();
   };
 

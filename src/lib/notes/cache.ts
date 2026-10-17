@@ -21,6 +21,11 @@ export type NoteDoc = NoteDetail & {
   localOnly?: boolean;
   /** The note was deleted (by us, or the server answered 404/410). */
   deleted?: boolean;
+  /**
+   * The cached content is newer than the server's (a save is queued, in flight, or was lost
+   * with a closed tab). The cache is persisted, so `reconcileNotes` can resend it.
+   */
+  syncPending?: boolean;
 };
 
 /** Mutation scope: all writes to one note run in order (create → updates → delete). */
@@ -123,6 +128,21 @@ export function upsertNoteInLists(qc: QueryClient, s: NoteSummary, opts: ListOpt
     if (!person) return list.filter((n) => n.id !== s.id);
     return [{ ...prev, ...s, person } as RecentNoteApi, ...list.filter((n) => n.id !== s.id)];
   });
+}
+
+/** A note's list row from whichever list cache has it (person page, paginated list, recent). */
+export function findSummary(qc: QueryClient, id: string): NoteSummary | null {
+  for (const [, p] of qc.getQueriesData<PersonDetailApi>({ queryKey: ["person"] })) {
+    const hit = p?.notes?.find((n) => n.id === id);
+    if (hit) return hit;
+  }
+  for (const [, data] of qc.getQueriesData<InfiniteData<NotesPage>>({ queryKey: ["notes", "person"] })) {
+    for (const page of data?.pages ?? []) {
+      const hit = page.items.find((n) => n.id === id);
+      if (hit) return hit;
+    }
+  }
+  return qc.getQueryData<RecentNoteApi[]>(keys.recentNotes())?.find((n) => n.id === id) ?? null;
 }
 
 function personRef(qc: QueryClient, personId: string) {

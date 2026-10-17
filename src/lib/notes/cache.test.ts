@@ -93,6 +93,16 @@ describe("drafts and offline writes", () => {
     expect(pendingNoteWrites(qc, id)[0]!.options.scope).toEqual({ id: noteScopeId(id) });
   });
 
+  it("a write from a list row (pin) patches the row and keeps its title, text and date", () => {
+    const row = { ...summary("row", { title: "Lunch", occurredAt: "2026-01-01T10:00:00.000Z" as unknown as Date }), excerpt: "Lunch\nTalked" };
+    qc.setQueryData(keys.person(P1), person(P1, [row]));
+    void saveNote(qc, "row", { personId: P1, pinned: true }, { sync: true });
+    const p = qc.getQueryData<PersonDetailApi>(keys.person(P1))!;
+    expect(p.notes[0]).toMatchObject({ id: "row", title: "Lunch", excerpt: "Lunch\nTalked", pinned: true, occurredAt: "2026-01-01T10:00:00.000Z" });
+    expect(p.notesCount).toBe(1);
+    expect(qc.getQueryData(keys.note("row"))).toBeUndefined();
+  });
+
   it("newer autosaves replace queued ones, but the create is kept", async () => {
     const id = startNoteDraft(qc, { personId: P1 });
     void saveNote(qc, id, { personId: P1, title: "v1", contentText: "v1", contentMd: "v1" }, { content: true, isNew: true });

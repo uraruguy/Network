@@ -11,13 +11,15 @@
  * in a per-note scope (`note:<id>`), so create → updates → delete always reach the server in
  * order. Each write patches the caches optimistically (see lib/notes/cache).
  */
-import { MutationObserver, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { MutationObserver, onlineManager, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useCallback, useMemo } from "react";
 import { toast } from "@/components/ui/Toast";
 import { api, ApiError } from "@/lib/api";
 import type { NoteKind } from "@/lib/constants";
 import {
+  EXCERPT_LENGTH,
+  findSummary,
   makeDraftNote,
   noteScopeId,
   pendingNoteWrites,
@@ -130,6 +132,21 @@ const CONTENT_KEYS = ["title", "contentJson", "contentMd", "contentText", "kind"
 
 function applyUpsert(qc: QueryClient, { id, body, isNew, fromPersonId }: UpsertVars) {
   const prev = qc.getQueryData<NoteDoc>(keys.note(id));
+  if (!prev) {
+    // A write from a list row (pin, move…): only the row is cached — patch it, keep the rest.
+    const row = findSummary(qc, id);
+    if (row) {
+      const next: NoteSummary = { ...row, updatedAt: new Date().toISOString() as unknown as Date };
+      if (body.title !== undefined) next.title = body.title ?? null;
+      if (body.contentText !== undefined) next.excerpt = body.contentText.slice(0, EXCERPT_LENGTH);
+      if (body.kind) next.kind = body.kind;
+      if (body.occurredAt) next.occurredAt = body.occurredAt as unknown as Date;
+      if (body.pinned !== undefined) next.pinned = body.pinned;
+      if (body.personId) next.personId = body.personId;
+      upsertNoteInLists(qc, next, { isNew: body.restore, fromPersonId: fromPersonId ?? (row.personId !== next.personId ? row.personId : null) });
+      return;
+    }
+  }
   if (!prev && !body.personId) return;
   const base = prev ?? makeDraftNote({ id, personId: body.personId! });
   const next: NoteDoc = { ...base, updatedAt: new Date().toISOString() as unknown as Date };
@@ -142,13 +159,59 @@ function applyUpsert(qc: QueryClient, { id, body, isNew, fromPersonId }: UpsertV
   if (body.pinned !== undefined) next.pinned = body.pinned;
   if (body.personId) next.personId = body.personId;
   if (body.restore) next.deleted = false;
+  next.syncPending = true;
   qc.setQueryData(keys.note(id), next);
   if (next.deleted) return;
   const from = fromPersonId ?? (prev && prev.personId !== next.personId ? prev.personId : null);
   upsertNoteInLists(qc, toSummary(next), { isNew: isNew || body.restore, fromPersonId: from });
 }
 
+/**
+ * Resends notes whose cached content never reached the server and has no write queued — e.g.
+ * the tab was closed while a save was still retrying. Runs after the cache is restored and when
+ * the device comes back online.
+ */
+export function reconcileNotes(qc: QueryClient) {
+  for (const query of qc.getQueryCache().findAll({ queryKey: ["note"] })) {
+    const doc = query.state.data as NoteDoc | undefined;
+    if (!doc?.syncPending || doc.deleted || pendingNoteWrites(qc, doc.id).length) continue;
+    saveNote(
+      qc,
+      doc.id,
+      {
+        personId: doc.personId,
+        title: doc.title,
+        contentJson: doc.contentJson,
+        contentMd: doc.contentMd,
+        contentText: doc.contentText,
+        kind: doc.kind as NoteKind,
+        occurredAt: new Date(doc.occurredAt).toISOString(),
+        pinned: doc.pinned,
+      },
+      { isNew: !!doc.localOnly, sync: true },
+    );
+  }
+}
+
+let reconcileTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleReconcile(qc: QueryClient, delay = 3000) {
+  if (reconcileTimer) clearTimeout(reconcileTimer);
+  reconcileTimer = setTimeout(() => {
+    reconcileTimer = null;
+    if (onlineManager.isOnline()) reconcileNotes(qc);
+  }, delay);
+}
+
 export function registerNoteMutations(qc: QueryClient) {
+  // After the persisted cache comes back (notes appear in the cache) and on reconnect, resend
+  // anything that was lost in flight. Restored paused writes win: they're already queued.
+  if (typeof window !== "undefined") {
+    qc.getQueryCache().subscribe((e) => {
+      if (e.type === "added" && e.query.queryKey[0] === "note" && (e.query.state.data as NoteDoc | undefined)?.syncPending) scheduleReconcile(qc);
+    });
+    onlineManager.subscribe((online) => online && scheduleReconcile(qc, 1500));
+  }
+
   const onSaved = (data: NoteDetail) => {
     qc.setQueryData(keys.note(data.id), data);
     upsertNoteInLists(qc, toSummary(data));
@@ -173,7 +236,7 @@ export function registerNoteMutations(qc: QueryClient) {
       const newer = pendingNoteWrites(qc, vars.id, vars).length > 0;
       qc.setQueryData<NoteDoc>(keys.note(data.id), (prev) => {
         if (!newer || !prev) return data;
-        const merged: NoteDoc = { ...data };
+        const merged: NoteDoc = { ...data, syncPending: true };
         for (const k of CONTENT_KEYS) (merged as Record<string, unknown>)[k] = prev[k];
         return merged;
       });
@@ -181,6 +244,8 @@ export function registerNoteMutations(qc: QueryClient) {
       if (vars.sync) scheduleNotesSync(qc, [data.personId, vars.fromPersonId]);
     },
     onError: (error: Error, vars: UpsertVars) => {
+      // The server refused it: resending won't help.
+      qc.setQueryData<NoteDoc>(keys.note(vars.id), (p) => (p ? { ...p, syncPending: false } : p));
       if (error instanceof ApiError && error.status === 410) {
         qc.setQueryData<NoteDoc>(keys.note(vars.id), (p) => (p ? { ...p, deleted: true } : p));
         return;
