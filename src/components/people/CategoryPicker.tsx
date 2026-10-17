@@ -1,24 +1,23 @@
 "use client";
-import { Chip } from "@/components/glass/Chip";
+import { Skeleton } from "@/components/ui/Skeleton";
+import { ToggleChip } from "@/components/ui/ToggleChip";
 import { useCategories } from "@/lib/queries/people";
+import { cn } from "@/lib/utils";
 import { CategoryIcon } from "./CategoryIcon";
 
-export function CategoryPicker({ value, onChange }: { value: string[]; onChange: (ids: string[]) => void }) {
-  const { data: cats = [] } = useCategories();
-  const toggle = (id: string) => onChange(value.includes(id) ? value.filter((v) => v !== id) : [...value, id]);
+/** Multi-select category chips, tinted with each category's palette colour. */
+export function CategoryPicker({ value, onChange, id, className }: { value: string[]; onChange: (ids: string[]) => void; id?: string; className?: string }) {
+  const { data: categories, isPending } = useCategories();
+  const toggle = (catId: string, on: boolean) => onChange(on ? [...value, catId] : value.filter((v) => v !== catId));
   return (
-    <div className="flex flex-wrap gap-2">
-      {cats.map((c) => {
-        const active = value.includes(c.id);
-        return (
-          <button key={c.id} type="button" onClick={() => toggle(c.id)} className="pressable" aria-pressed={active}>
-            <Chip color={c.color} active={active}>
-              <CategoryIcon name={c.icon} size={14} />
+    <div id={id} role="group" aria-label="Categories" className={cn("flex flex-wrap gap-2", className)}>
+      {isPending && !categories
+        ? Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-8 rounded-full" style={{ width: 72 + ((i * 23) % 40) }} />)
+        : categories?.map((c) => (
+            <ToggleChip key={c.id} pressed={value.includes(c.id)} onPressedChange={(on) => toggle(c.id, on)} color={c.color} icon={<CategoryIcon name={c.icon} />}>
               {c.name}
-            </Chip>
-          </button>
-        );
-      })}
+            </ToggleChip>
+          ))}
     </div>
   );
 }
