@@ -1,4 +1,9 @@
 import type { MetadataRoute } from "next";
+import { oklchToHex } from "@/lib/design/color";
+
+// From the design tokens (globals.css): the canvas `--bg` (light), so the splash screen and the
+// standalone window chrome match the first painted frame. Hex because manifests can't take OKLCH.
+const CANVAS = oklchToHex(0.985, 0.004, 200);
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
@@ -11,8 +16,8 @@ export default function manifest(): MetadataRoute.Manifest {
     display: "standalone",
     display_override: ["standalone", "minimal-ui"],
     orientation: "portrait",
-    background_color: "#f4fbfb",
-    theme_color: "#0fb5ba",
+    background_color: CANVAS,
+    theme_color: CANVAS,
     categories: ["productivity", "social"],
     icons: [
       { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
