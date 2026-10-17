@@ -16,11 +16,20 @@ pnpm tsx scripts/seed-dev-user.ts   # local owner account dev@local.test / netwo
 pnpm dev                     # http://localhost:3100
 ```
 
+### Environment (security-relevant)
+| Variable | Required | Notes |
+|---|---|---|
+| `APP_SECRET` | production | ≥ 32 chars, root key for everything the app signs/encrypts itself (passkey session cookie, WebAuthn challenges, recovery codes, connection secrets). Generate with `openssl rand -base64 48`. No fallback. |
+| `APP_SECRET_PREVIOUS` | no | Set to the old value while rotating `APP_SECRET`; still accepted for verification, never used to sign. |
+| `AUTH_REQUIRE_PASSKEY` | no | Passkey second factor is **required by default**. Set `false` only in local development (e.g. before the passkey UI exists). |
+
+Auth model: Supabase handles the password step; the proxy (`src/proxy.ts`) verifies the Supabase JWT locally on every request and requires a passkey cookie bound to the Supabase session. API handlers re-verify (`withOwner`). Route classes are documented in `src/lib/auth/routes.ts`.
+
 ## Deploy (Vercel + Supabase cloud)
 1. `supabase link --project-ref <ref>` then `supabase db push`, then `pnpm db:seed-cities` with `DATABASE_URL` pointing at the cloud DB.
 2. In the Supabase dashboard → Authentication → URL configuration: Site URL = your Vercel URL; add `<url>/auth/callback` to redirect URLs.
 3. `vercel` → set env vars from `.env.example` (`CRON_SECRET`/`INBOX_TOKEN`: `openssl rand -hex 24`).
-4. Schedule the hourly digest from Postgres: `select set_digest_target('https://<your-app>.vercel.app', '<CRON_SECRET>');` (uses pg_cron + pg_net). `vercel.json` also has a daily fallback.
+4. Schedule the hourly digest from Postgres: `select private.set_digest_target('https://<your-app>.vercel.app', '<CRON_SECRET>');` (uses pg_cron + pg_net). `vercel.json` also has a daily fallback.
 5. Sign up once with your email — the first account claims the instance; further sign-ups are rejected.
 
 ## Local Mac against the cloud database (recommended for the Apple Notes import)

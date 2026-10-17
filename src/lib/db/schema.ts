@@ -315,6 +315,7 @@ export const notes = pgTable(
     index("notes_person_idx").on(t.personId, t.occurredAt),
     index("notes_person_timeline_idx").on(t.personId, t.occurredAt.desc()).where(sql`${t.deletedAt} is null`),
     index("notes_owner_timeline_idx").on(t.ownerId, t.occurredAt.desc()).where(sql`${t.deletedAt} is null`),
+    index("notes_owner_updated_idx").on(t.ownerId, t.updatedAt.desc()).where(sql`${t.deletedAt} is null`),
     index("notes_search_idx").using("gin", t.search),
   ],
 );
