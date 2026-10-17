@@ -13,6 +13,7 @@ import { GlassSheet } from "@/components/glass/GlassSheet";
 import { Logo } from "@/components/shell/Logo";
 import { usePerson } from "@/lib/queries/people";
 import { cn, formatRelative } from "@/lib/utils";
+import "./chat.css";
 
 type Thread = { id: string; title: string | null; updatedAt: string; personId: string | null };
 type ThreadDetail = Thread & { messages: { id: string; role: string; parts: unknown }[] };

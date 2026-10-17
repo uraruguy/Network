@@ -9,6 +9,7 @@ import { Markdown } from "@tiptap/markdown";
 import { Bold, CheckSquare, Heading2, Italic, List, ListOrdered, Quote } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
+import "./editor.css";
 
 export type NoteContent = { json: unknown; md: string; text: string; title: string | null };
 

@@ -20,8 +20,9 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f4fbfb" },
-    { media: "(prefers-color-scheme: dark)", color: "#061516" },
+    // Canvas colour (--bg) per scheme; ThemeSync pins both when the user overrides the OS.
+    { media: "(prefers-color-scheme: light)", color: "#f7fbfb" },
+    { media: "(prefers-color-scheme: dark)", color: "#070f10" },
   ],
   width: "device-width",
   initialScale: 1,
@@ -29,8 +30,8 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
-// Applies .dark before first paint; honours a saved override.
-const themeScript = `(function(){try{var t=localStorage.getItem('theme');var d=t?t==='dark':matchMedia('(prefers-color-scheme: dark)').matches;if(d)document.documentElement.classList.add('dark');}catch(e){}})();`;
+// Applies .dark + color-scheme before first paint; honours a saved override. ThemeSync takes over after hydration.
+const themeScript = `(function(){try{var t=localStorage.getItem('theme');var d=t==='dark'||(t!=='light'&&matchMedia('(prefers-color-scheme: dark)').matches);var r=document.documentElement;if(d)r.classList.add('dark');r.style.colorScheme=d?'dark':'light';if(t==='light'||t==='dark'){var c=d?'#070f10':'#f7fbfb';document.querySelectorAll('meta[name="theme-color"]').forEach(function(m){m.content=c})}}catch(e){}})();`;
 const devErrorHook =
   process.env.NODE_ENV === "development"
     ? `window.__errs=[];addEventListener('error',function(e){window.__errs.push(String(e.error&&e.error.stack||e.message).slice(0,2000))});addEventListener('unhandledrejection',function(e){window.__errs.push('REJ '+String(e.reason&&e.reason.stack||e.reason).slice(0,2000))});`
