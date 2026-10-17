@@ -1,7 +1,7 @@
 /**
  * Shared bootstrap for every `scripts/import/*` command.
  *
- *   --env <file>     env file to load (default .env.local); its values override the shell
+ *   --env <file>     env file to load (default .env.local), layered over .env.local; overrides the shell
  *   --yes-prod       allow a non-local DATABASE_URL host (otherwise the script refuses)
  *   --write          perform writes (every write-capable script is a dry run without it)
  *   --owner <email>  owner profile (default: the only profile in the database)
@@ -89,6 +89,10 @@ export function bootstrap(opts: { needsDb?: boolean; writes?: boolean } = {}): C
   const envFile = args.opt("--env", ".env.local")!;
   const envPath = resolve(root, envFile);
   if (!existsSync(envPath)) throw new Error(`env file not found: ${envPath}`);
+  // Like `dotenv run -f <file> --override` on top of .env.local: a cloud env file may only carry
+  // DATABASE_URL & co, the base file supplies the rest.
+  const base = resolve(root, ".env.local");
+  if (envPath !== base && existsSync(base)) config({ path: base, override: true, quiet: true });
   config({ path: envPath, override: true, quiet: true });
 
   let dbHost = "-";
