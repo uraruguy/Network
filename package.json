@@ -7,6 +7,7 @@
     "build": "next build && serwist build",
     "start": "next start",
     "lint": "eslint .",
+    "lint:design": "tsx scripts/check-design.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",

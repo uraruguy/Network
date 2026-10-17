@@ -43,3 +43,6 @@ public/sw*
 .env*.local
 drizzle/meta
 .cache
+
+# agent worktrees
+.claude/worktrees/
