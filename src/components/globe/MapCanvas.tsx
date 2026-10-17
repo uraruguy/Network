@@ -186,7 +186,7 @@ function MapCanvasInner({
         container: el,
         style,
         center,
-        zoom: planetZoom(w, h),
+        zoom: planetZoom(w, h, { lat: center[1], containerHeight: el.clientHeight }),
         pixelRatio: Math.min(2, window.devicePixelRatio || 1),
         attributionControl: false,
         maplibreLogo: false,
@@ -202,7 +202,8 @@ function MapCanvasInner({
       return;
     }
     mapRef.current = m;
-    m.setPadding(pad);
+    // Apply the overlay insets without shifting the planet off its centre (setPadding would).
+    m.jumpTo({ center, padding: pad });
     m.addControl(new AttributionControl({ compact: true }), "bottom-left");
 
     let idle: ReturnType<typeof setTimeout> | undefined;
@@ -248,9 +249,9 @@ function MapCanvasInner({
     const reveal = () => setRevealed(true);
     m.once("idle", reveal);
     m.on("sourcedata", (e) => {
-      if (e.sourceId === SRC.basemap && e.isSourceLoaded) reveal();
+      if (e.sourceId === SRC.basemap && e.tile && m.isSourceLoaded(SRC.basemap)) reveal();
     });
-    const revealAnyway = setTimeout(reveal, 3500);
+    const revealAnyway = setTimeout(reveal, 8000);
     m.on("webglcontextlost", () => fail("lost"));
     m.on("error", (e) => console.warn("[globe]", e.error?.message ?? e));
 
@@ -341,7 +342,7 @@ function MapCanvasInner({
         const m = mapRef.current;
         if (!m) return;
         const el = m.getContainer();
-        const zoom = planetZoom(el.clientWidth - (pad.left ?? 0) - (pad.right ?? 0), el.clientHeight - (pad.top ?? 0) - (pad.bottom ?? 0));
+        const zoom = planetZoom(el.clientWidth - (pad.left ?? 0) - (pad.right ?? 0), el.clientHeight - (pad.top ?? 0) - (pad.bottom ?? 0), { lat: center[1], containerHeight: el.clientHeight });
         setSpinning(false);
         resumeAfterFly.current = true;
         m.flyTo({ center, zoom, pitch: 0, bearing: 0, padding: pad, speed: 1.3, curve: 1.6, maxDuration: 3000 });

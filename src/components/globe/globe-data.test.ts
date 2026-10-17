@@ -152,5 +152,12 @@ describe("camera helpers", () => {
     expect(planetZoom(375, 700)).toBeLessThan(planetZoom(1400, 900));
     expect(planetZoom(10, 10)).toBe(0);
     expect(planetZoom(10000, 10000)).toBeLessThanOrEqual(2.6);
+    // Same planet size further north needs a lower zoom (MapLibre scales the globe by 1/cos(lat)).
+    expect(planetZoom(1200, 900, { lat: 60 })).toBeCloseTo(planetZoom(1200, 900) - 1, 6);
+    // Inverse of MapLibre's perspective: the silhouette radius D·R/√(D²+2DR) comes back as asked.
+    const z = planetZoom(343, 604, { containerHeight: 812, fill: 0.94 });
+    const R = (512 * 2 ** z) / (2 * Math.PI);
+    const D = 1.5 * 812;
+    expect((2 * D * R) / Math.sqrt(D * D + 2 * D * R)).toBeCloseTo(343 * 0.94, 0);
   });
 });

@@ -201,14 +201,24 @@ export function citiesBounds(cities: Iterable<CityGroup>): [LngLatPair, LngLatPa
   return se - sw < east - west ? [[sw, south], [se, north]] : [[west, south], [east, north]];
 }
 
+/** MapLibre's default vertical field of view (36.87°) puts the camera 1.5 viewport-heights from the centre. */
+const CAMERA_DISTANCE_PER_HEIGHT = 0.5 / Math.tan((36.87 / 2) * RAD);
+
 /**
- * Zoom at which the globe fills ~`fill` of the smaller viewport side (default: 94% on portrait
- * phones, 82% otherwise). MapLibre's globe radius
- * in px is worldSize / 2π with worldSize = 512·2^z, so diameter = 512·2^z / π.
+ * Zoom at which the planet's silhouette fills ~`fill` of the free area's smaller side (default:
+ * 94% on portrait phones, 82% otherwise). Accounts for MapLibre's globe maths:
+ * - radius R = worldSize / (2π·cos(lat)), worldSize = 512·2^z (feature scale at the centre
+ *   latitude matches Mercator, so the planet grows away from the equator);
+ * - perspective: seen from distance D (= 1.5 × container height), the silhouette radius on
+ *   screen is D·R / √(D² + 2·D·R), which we invert for R.
  */
-export function planetZoom(width: number, height: number, fill?: number): number {
+export function planetZoom(width: number, height: number, opts: { lat?: number; fill?: number; containerHeight?: number } = {}): number {
   const side = Math.max(1, Math.min(width, height));
   // Portrait phones are width-bound: let the planet nearly reach the edges.
-  fill ??= width < height * 0.7 ? 0.94 : 0.82;
-  return Math.min(2.6, Math.max(0, Math.log2((side * fill * Math.PI) / 512)));
+  const fill = opts.fill ?? (width < height * 0.7 ? 0.94 : 0.82);
+  const d = CAMERA_DISTANCE_PER_HEIGHT * Math.max(1, opts.containerHeight ?? height);
+  const k = (side * fill) / 2 / d;
+  const radius = d * (k * k + k * Math.sqrt(k * k + 1));
+  const cosLat = Math.cos(Math.min(Math.abs(opts.lat ?? 0), 85) * RAD);
+  return Math.min(2.6, Math.max(0, Math.log2((2 * Math.PI * cosLat * radius) / 512)));
 }

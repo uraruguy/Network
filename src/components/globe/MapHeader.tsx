@@ -69,7 +69,7 @@ export const MapHeader = forwardRef<HTMLDivElement, MapHeaderProps>(function Map
         </div>
         <ViewSwitch />
       </div>
-      {children && <div className="mt-2 flex flex-col items-start gap-2">{children}</div>}
+      {children && <div className="mt-2 flex flex-col items-start gap-2 [&>*]:pointer-events-auto">{children}</div>}
     </div>
   );
 });
