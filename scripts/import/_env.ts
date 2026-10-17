@@ -11,6 +11,7 @@
  * Import order matters: call `bootstrap()` before dynamically importing anything that touches
  * `@/lib/db` (the connection is created from process.env at import time).
  */
+import "../lib/server-only";
 import { config } from "dotenv";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
