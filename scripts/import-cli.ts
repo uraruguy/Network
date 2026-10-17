@@ -5,6 +5,7 @@
  * Re-running with the same file is safe: unchanged notes keep their progress.
  * Review/approve afterwards in the app (Settings → Import), or pass --auto to commit all high-confidence items.
  */
+import "./lib/server-only";
 import { config } from "dotenv";
 config({ path: [".env.local", ".env"] });
 import { readFileSync } from "node:fs";

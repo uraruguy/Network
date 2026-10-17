@@ -1,15 +1,16 @@
-import { z } from "zod";
-import { withOwner, parseBody, notFound } from "@/lib/api-server";
-import { completeReminder, deleteReminder, snoozeReminder } from "@/lib/data/reminders";
+import { notFound, parseBody, withOwner } from "@/lib/api-server";
+import { completeReminder, deleteReminder, rescheduleReminder, snoozeReminder } from "@/lib/data/reminders";
+import { reminderAction } from "@/lib/schemas";
 
-const action = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("done") }),
-  z.object({ action: z.literal("snooze"), days: z.number().int().min(1).max(365) }),
-]);
-
+/** PATCH {action:"done"} | {action:"snooze", days} | {action:"reschedule", dueAt} → reminder. */
 export const PATCH = withOwner<{ id: string }>(async ({ ownerId, params, req }) => {
-  const body = await parseBody(req, action);
-  const r = body.action === "done" ? await completeReminder(ownerId, params.id) : await snoozeReminder(ownerId, params.id, body.days);
+  const body = await parseBody(req, reminderAction);
+  const r =
+    body.action === "done"
+      ? await completeReminder(ownerId, params.id)
+      : body.action === "snooze"
+        ? await snoozeReminder(ownerId, params.id, body.days)
+        : await rescheduleReminder(ownerId, params.id, new Date(body.dueAt));
   return r ?? notFound();
 });
 

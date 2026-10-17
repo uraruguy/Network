@@ -2,8 +2,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { keys } from "./keys";
-import type { City, GlobeEntry, ProfileDetail } from "./types";
+import type { City, GlobeEntry, GraphLink, GraphNode, ProfileDetail, Stats } from "./types";
 import type { LocationInput } from "@/lib/schemas";
+
+/** Optional id filters shared by the globe and the graph (each matches ANY of the given ids). */
+export type MapFilters = { category?: string[]; activity?: string[]; tag?: string[] };
+
+function filterQs(f?: MapFilters) {
+  const p = new URLSearchParams();
+  for (const [k, ids] of Object.entries(f ?? {})) if (ids?.length) p.set(k, ids.join(","));
+  const s = p.toString();
+  return s ? `?${s}` : "";
+}
+const hasFilters = (f?: MapFilters) => !!f && Object.values(f).some((v) => v?.length);
 
 export function useCitySearch(q: string) {
   return useQuery({
@@ -15,8 +26,25 @@ export function useCitySearch(q: string) {
   });
 }
 
-export function useGlobe() {
-  return useQuery({ queryKey: keys.globe(), queryFn: () => api.get<GlobeEntry[]>("/api/globe") });
+export function useGlobe(filters?: MapFilters) {
+  return useQuery({
+    queryKey: keys.globe(hasFilters(filters) ? filters : undefined),
+    queryFn: () => api.get<GlobeEntry[]>(`/api/globe${filterQs(filters)}`),
+    placeholderData: (prev) => prev,
+  });
+}
+
+export function useGraph(filters?: MapFilters) {
+  return useQuery({
+    queryKey: keys.graph(hasFilters(filters) ? filters : undefined),
+    queryFn: () => api.get<{ nodes: GraphNode[]; links: GraphLink[] }>(`/api/graph${filterQs(filters)}`),
+    placeholderData: (prev) => prev,
+  });
+}
+
+/** {people, cities, dueToday, overdue, upcoming7d} — "today" in the profile timezone. */
+export function useStats() {
+  return useQuery({ queryKey: keys.stats(), queryFn: () => api.get<Stats>("/api/stats") });
 }
 
 export function useProfile() {
@@ -31,14 +59,11 @@ export function useUpdateProfile() {
     onSuccess: (data) => {
       qc.setQueryData(keys.profile(), data);
       qc.invalidateQueries({ queryKey: keys.globe() });
+      qc.invalidateQueries({ queryKey: keys.stats() });
     },
   });
 }
 
 export function cityToLocation(c: City): LocationInput {
   return { cityId: c.id, name: c.name, admin: c.admin, country: c.country, countryCode: c.countryCode, lat: c.lat, lng: c.lng, timezone: c.timezone };
-}
-
-export function useGraph() {
-  return useQuery({ queryKey: ["graph"], queryFn: () => api.get<{ nodes: import("@/lib/data/graph").GraphNode[]; links: import("@/lib/data/graph").GraphLink[] }>("/api/graph") });
 }

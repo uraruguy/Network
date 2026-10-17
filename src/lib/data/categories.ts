@@ -1,20 +1,25 @@
-import { and, asc, eq } from "drizzle-orm";
+import "server-only";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
+import { qcol } from "./sql";
 import type { CategoryData } from "@/lib/schemas";
+import { slugify } from "@/lib/text";
 
-const { categories } = schema;
+const { categories, personCategories, people } = schema;
+
+/** Live people linked to the row (for taxonomy counts). */
+export const categoryCount = sql<number>`(select count(*)::int from ${personCategories} pc join ${people} p on p.id = pc.person_id and p.deleted_at is null where pc.category_id = ${qcol(categories.id)})`;
 
 export function listCategories(ownerId: string) {
   return db.query.categories.findMany({ where: eq(categories.ownerId, ownerId), orderBy: [asc(categories.sort), asc(categories.name)] });
 }
 
-function slugify(s: string) {
-  return s
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
+export function listCategoriesWithCounts(ownerId: string) {
+  return db
+    .select({ id: categories.id, name: categories.name, slug: categories.slug, color: categories.color, icon: categories.icon, sort: categories.sort, count: categoryCount })
+    .from(categories)
+    .where(eq(categories.ownerId, ownerId))
+    .orderBy(asc(categories.sort), asc(categories.name));
 }
 
 export async function createCategory(ownerId: string, input: CategoryData) {
@@ -31,6 +36,7 @@ export async function updateCategory(ownerId: string, id: string, patch: Partial
   return row ?? null;
 }
 
-export async function deleteCategory(ownerId: string, id: string) {
-  await db.delete(categories).where(and(eq(categories.ownerId, ownerId), eq(categories.id, id)));
+export async function deleteCategory(ownerId: string, id: string): Promise<boolean> {
+  const rows = await db.delete(categories).where(and(eq(categories.ownerId, ownerId), eq(categories.id, id))).returning({ id: categories.id });
+  return rows.length > 0;
 }

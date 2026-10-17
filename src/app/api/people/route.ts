@@ -1,17 +1,19 @@
-import { withOwner, parseBody } from "@/lib/api-server";
-import { createPerson, listPeople } from "@/lib/data/people";
+import { NextResponse } from "next/server";
+import { parseBody, withOwner } from "@/lib/api-server";
+import { createPersonIdempotent, listPeopleIndex } from "@/lib/data/people";
 import { personInput } from "@/lib/schemas";
-import type { Warmth } from "@/lib/constants";
 
-export const GET = withOwner(async ({ ownerId, url }) => {
-  const q = url.searchParams.get("q") ?? undefined;
-  const categoryId = url.searchParams.get("category") ?? undefined;
-  const warmth = (url.searchParams.get("warmth") as Warmth | null) ?? undefined;
-  const countryCode = url.searchParams.get("country") ?? undefined;
-  return listPeople(ownerId, { q, categoryId, warmth, countryCode });
-});
+/**
+ * GET  → PersonIndexRow[]: every live person, compact, most recently in touch first. The client
+ *        caches this whole list and filters locally; use /api/people/search for server-side filters.
+ */
+export const GET = withOwner(async ({ ownerId }) => listPeopleIndex(ownerId));
 
+/**
+ * POST → PersonDetail. 201 when created, 200 when a client-generated `id` already exists for this
+ * owner (idempotent replay), 409 when the id is taken otherwise.
+ */
 export const POST = withOwner(async ({ ownerId, req }) => {
-  const input = await parseBody(req, personInput);
-  return createPerson(ownerId, input);
+  const { person, created } = await createPersonIdempotent(ownerId, await parseBody(req, personInput));
+  return NextResponse.json(person, { status: created ? 201 : 200 });
 });

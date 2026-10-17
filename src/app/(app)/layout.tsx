@@ -1,9 +1,9 @@
-import { redirect } from "next/navigation";
 import { AppShell } from "@/components/shell/AppShell";
-import { currentUser } from "@/lib/supabase/server";
 
-export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const user = await currentUser();
-  if (!user) redirect("/login");
+/**
+ * No auth check here on purpose: the proxy gates every page request and the API re-verifies every
+ * call, so the shell stays static and prefetchable (and opens instantly offline).
+ */
+export default function AppLayout({ children }: { children: React.ReactNode }) {
   return <AppShell>{children}</AppShell>;
 }

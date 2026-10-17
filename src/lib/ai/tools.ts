@@ -1,42 +1,52 @@
+import "server-only";
 import { tool } from "ai";
-import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
-import { db, schema } from "@/lib/db";
-import { CIRCLES, HOBBIES, WARMTH } from "@/lib/constants";
+import { CIRCLES, NOTE_KINDS, WARMTH } from "@/lib/constants";
 import { listCategories } from "@/lib/data/categories";
-import { createNote, searchNotes } from "@/lib/data/notes";
-import { createPerson, getPerson, listPeople } from "@/lib/data/people";
+import { listActivities } from "@/lib/data/activities";
+import { createNote, listNotes, searchNotes } from "@/lib/data/notes";
+import { createPerson, getPerson, peopleByPlace, recentInteractions, searchPeople, type PersonIndexRow } from "@/lib/data/people";
 import { createReminder, listReminders } from "@/lib/data/reminders";
 import { searchCities } from "@/lib/data/locations";
+import { listTaxonomy } from "@/lib/data/tags";
 
-const { people } = schema;
+type Names = { categories: Map<string, string>; activities: Map<string, string> };
 
-function personSummary(p: Awaited<ReturnType<typeof listPeople>>[number]) {
+async function nameMaps(ownerId: string): Promise<Names> {
+  const [cats, acts] = await Promise.all([listCategories(ownerId), listActivities(ownerId)]);
+  return { categories: new Map(cats.map((c) => [c.id, c.name])), activities: new Map(acts.map((a) => [a.id, a.name])) };
+}
+
+function personSummary(p: PersonIndexRow, names: Names) {
   return {
     id: p.id,
     name: p.displayName,
     role: p.headline,
     company: p.company,
     city: p.homeLocation ? `${p.homeLocation.name}, ${p.homeLocation.country}` : null,
-    categories: p.categories.map((c) => c.name),
+    categories: p.categoryIds.map((id) => names.categories.get(id)).filter(Boolean),
+    activities: p.activityIds.map((id) => names.activities.get(id)).filter(Boolean),
     warmth: p.warmth,
     circle: p.circle,
-    hobbies: p.hobbies,
     lastInteraction: p.lastInteractionAt,
     nextFollowup: p.nextFollowupAt,
-    metContext: p.metContext,
   };
+}
+
+/** Resolves names (case-insensitive, by name or slug) to ids. */
+function idsFor(names: string[] | undefined, map: Map<string, string>) {
+  if (!names?.length) return undefined;
+  const wanted = names.map((n) => n.toLowerCase());
+  return [...map].filter(([, name]) => wanted.includes(name.toLowerCase())).map(([id]) => id);
 }
 
 async function resolvePerson(ownerId: string, ref: { id?: string | null; name?: string | null }) {
   if (ref.id) return getPerson(ownerId, ref.id);
   if (ref.name) {
-    const hits = await listPeople(ownerId, { q: ref.name });
-    if (hits.length === 1) return getPerson(ownerId, hits[0]!.id);
-    if (hits.length > 1) {
-      const exact = hits.find((h) => h.displayName.toLowerCase() === ref.name!.toLowerCase());
-      if (exact) return getPerson(ownerId, exact.id);
-    }
+    const { items } = await searchPeople(ownerId, { q: ref.name }, { limit: 5 });
+    const exact = items.find((h) => h.displayName.toLowerCase() === ref.name!.toLowerCase());
+    if (exact) return getPerson(ownerId, exact.id);
+    if (items.length === 1) return getPerson(ownerId, items[0]!.id);
   }
   return null;
 }
@@ -45,61 +55,113 @@ async function resolvePerson(ownerId: string, ref: { id?: string | null; name?: 
 export function networkTools(ownerId: string) {
   return {
     search_people: tool({
-      description: "Search people in the network by free text (name, role, company). Optionally filter by category name, warmth, or country code. Returns summaries.",
+      description:
+        "Search people by free text (name, role, company, how you met — fuzzy and accent-insensitive) and/or filters (category, activity, warmth, circle, country, not contacted since). Returns summaries, best matches first.",
       inputSchema: z.object({
-        query: z.string().optional().describe("Free text: name, role, company"),
-        category: z.string().optional().describe("Category name, e.g. Mentor, Investor"),
-        warmth: z.enum(WARMTH).optional(),
-        circle: z.enum(CIRCLES).optional(),
-        hobby: z.enum(HOBBIES).optional(),
+        query: z.string().optional().describe("Free text: name, role, company, context"),
+        categories: z.array(z.string()).optional().describe("Category names, e.g. Mentor, Investor (matches any)"),
+        activities: z.array(z.string()).optional().describe("Activity names, e.g. Football, Dinners (matches any)"),
+        warmth: z.array(z.enum(WARMTH)).optional(),
+        circle: z.array(z.enum(CIRCLES)).optional(),
         countryCode: z.string().length(2).optional(),
+        notContactedSince: z.string().optional().describe("ISO date: only people not in touch since then"),
         limit: z.number().int().min(1).max(50).default(20),
       }),
-      execute: async ({ query, category, warmth, circle, hobby, countryCode, limit }) => {
-        const cats = await listCategories(ownerId);
-        const cat = category ? cats.find((c) => c.name.toLowerCase() === category.toLowerCase() || c.slug === category.toLowerCase()) : undefined;
-        let rows = await listPeople(ownerId, { q: query, categoryId: cat?.id, warmth, countryCode });
-        if (circle) rows = rows.filter((r) => r.circle === circle);
-        if (hobby) rows = rows.filter((r) => r.hobbies.includes(hobby));
-        return { count: rows.length, people: rows.slice(0, limit).map(personSummary) };
+      execute: async ({ query, categories, activities, warmth, circle, countryCode, notContactedSince, limit }) => {
+        const names = await nameMaps(ownerId);
+        const since = notContactedSince ? new Date(notContactedSince) : undefined;
+        const { items, nextCursor } = await searchPeople(
+          ownerId,
+          {
+            q: query,
+            categoryIds: idsFor(categories, names.categories),
+            activityIds: idsFor(activities, names.activities),
+            warmth,
+            circle,
+            countryCode,
+            lastContactBefore: since && !Number.isNaN(since.getTime()) ? since : undefined,
+          },
+          { limit },
+        );
+        return { count: items.length, more: !!nextCursor, people: items.map((p) => personSummary(p, names)) };
       },
     }),
 
     get_person: tool({
-      description: "Get everything about one person: profile, how you met, notes (with text), follow-ups, who introduced them, who they introduced.",
+      description: "Everything about one person: profile, how you met, recent notes, follow-ups, who introduced them, who they introduced.",
       inputSchema: z.object({ id: z.string().uuid().optional(), name: z.string().optional() }),
       execute: async (ref) => {
         const p = await resolvePerson(ownerId, ref);
         if (!p) return { error: "No unique person found. Use search_people first." };
+        const names = await nameMaps(ownerId);
+        const { items: notes } = await listNotes(ownerId, p.id, { limit: 20, full: true });
         return {
-          ...personSummary(p as never),
+          id: p.id,
+          name: p.displayName,
+          role: p.headline,
+          company: p.company,
+          city: p.homeLocation ? `${p.homeLocation.name}, ${p.homeLocation.country}` : null,
+          categories: p.categories.map((c) => c.name),
+          activities: p.activityIds.map((id) => names.activities.get(id)).filter(Boolean),
+          tags: p.tags.map((t) => t.name),
+          warmth: p.warmth,
+          circle: p.circle,
+          metContext: p.metContext,
           metAt: p.metAt,
           metLocation: p.metLocation ? `${p.metLocation.name}, ${p.metLocation.country}` : null,
           introducedBy: p.introducedBy?.displayName ?? null,
           introduced: p.introduced.map((q) => q.displayName),
           email: p.email, phone: p.phone, linkedin: p.linkedin, x: p.xHandle, website: p.website, birthday: p.birthday,
           howICanHelp: p.howICanHelp, whatICanAsk: p.whatICanAsk,
-          notes: p.notes.map((n) => ({ id: n.id, title: n.title, kind: n.kind, date: n.occurredAt, text: n.contentText.slice(0, 2000) })),
+          lastInteraction: p.lastInteractionAt,
+          notesCount: p.notesCount,
+          notes: notes.map((n) => ({ id: n.id, title: n.title, kind: n.kind, date: n.occurredAt, text: (n.contentText ?? n.excerpt).slice(0, 2000) })),
           followUps: p.reminders.map((r) => ({ id: r.id, due: r.dueAt, message: r.message, status: r.status, recurrence: r.recurrence })),
+          mentionedIn: p.mentions.slice(0, 10).map((m) => ({ noteId: m.note.id, about: m.note.personName, date: m.note.occurredAt, excerpt: m.note.excerpt })),
           url: `/people/${p.id}`,
         };
       },
     }),
 
     people_in_location: tool({
-      description: "People who live in a given city or country.",
-      inputSchema: z.object({ place: z.string().describe("City or country name, e.g. Berlin, Slovenia, San Francisco") }),
-      execute: async ({ place }) => {
-        // Single-user scale: fetch everyone with a home and filter in JS (handles city, region and country in one go).
-        const all = await db.query.people.findMany({ where: and(eq(people.ownerId, ownerId), isNull(people.deletedAt)), with: { homeLocation: true, categories: { with: { category: true } } } });
-        const q = place.toLowerCase();
-        const hits = all.filter((p) => p.homeLocation && (p.homeLocation.name.toLowerCase().includes(q) || p.homeLocation.country.toLowerCase().includes(q) || (p.homeLocation.admin ?? "").toLowerCase().includes(q)));
-        return { count: hits.length, people: hits.map((p) => personSummary({ ...p, categories: p.categories.map((pc) => pc.category) } as never)) };
+      description: "People who live in or near a place: a country (name or code) or a city (with radius in km, default 50).",
+      inputSchema: z.object({
+        place: z.string().describe("City or country, e.g. Berlin, Slovenia, SI, San Francisco"),
+        radiusKm: z.number().min(1).max(2000).optional(),
+      }),
+      execute: async ({ place, radiusKm }) => {
+        const names = await nameMaps(ownerId);
+        const res = await peopleByPlace(ownerId, place, { radiusKm });
+        if (!res.place) return { error: `Unknown place: ${place}` };
+        return { place: res.place, count: res.people.length, people: res.people.map((p) => ({ ...personSummary(p, names), distanceKm: p.distanceKm })) };
+      },
+    }),
+
+    recent_interactions: tool({
+      description: "People you were in touch with recently (by notes), newest first, with their latest note.",
+      inputSchema: z.object({ days: z.number().int().min(1).max(365).default(30), limit: z.number().int().min(1).max(50).default(20) }),
+      execute: async ({ days, limit }) => {
+        const names = await nameMaps(ownerId);
+        const rows = await recentInteractions(ownerId, { days, limit });
+        return rows.map((r) => ({ ...personSummary(r, names), notesInPeriod: r.notesInPeriod, lastNote: r.lastNote }));
+      },
+    }),
+
+    list_taxonomy: tool({
+      description: "Categories, activities and tags in use, with how many people have each.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        const t = await listTaxonomy(ownerId);
+        return {
+          categories: t.categories.map((c) => ({ name: c.name, count: c.count })),
+          activities: t.activities.map((a) => ({ name: a.name, emoji: a.emoji, count: a.count })),
+          tags: t.tags.map((x) => ({ name: x.name, count: x.count })),
+        };
       },
     }),
 
     due_followups: tool({
-      description: "Follow-up reminders due within the next N days (default 7), oldest first.",
+      description: "Follow-up reminders due within the next N days (default 7), oldest first (includes overdue).",
       inputSchema: z.object({ days: z.number().int().min(0).max(365).default(7) }),
       execute: async ({ days }) => {
         const until = new Date();
@@ -110,17 +172,23 @@ export function networkTools(ownerId: string) {
     }),
 
     search_notes: tool({
-      description: "Full-text search across all notes. Use for 'who mentioned X', 'what did we discuss about Y'.",
-      inputSchema: z.object({ query: z.string().min(2), limit: z.number().int().min(1).max(30).default(10) }),
-      execute: async ({ query, limit }) => {
-        const rows = await searchNotes(ownerId, query, limit);
-        return rows.map((n) => ({ id: n.id, person: n.person.displayName, personId: n.personId, title: n.title, date: n.occurredAt, excerpt: excerpt(n.contentText, query) }));
+      description: "Full-text search across all notes (accent-insensitive, prefix matching, \"quoted phrases\", -exclusions, OR). Use for 'who mentioned X', 'what did we discuss about Y'.",
+      inputSchema: z.object({
+        query: z.string().min(2),
+        personId: z.string().uuid().optional(),
+        since: z.string().optional().describe("ISO date"),
+        limit: z.number().int().min(1).max(30).default(10),
+      }),
+      execute: async ({ query, personId, since, limit }) => {
+        const s = since ? new Date(since) : undefined;
+        const rows = await searchNotes(ownerId, { query, personId, since: s && !Number.isNaN(s.getTime()) ? s : undefined, limit });
+        return rows.map((n) => ({ id: n.id, person: n.personName, personId: n.personId, title: n.title, date: n.occurredAt, snippet: n.snippet }));
       },
     }),
 
     create_note: tool({
       description: "Add a note to a person. Use when the user asks to note/remember something about someone. Confirm the person first if ambiguous.",
-      inputSchema: z.object({ personId: z.string().uuid(), text: z.string().min(1), kind: z.enum(["note", "meeting", "call", "message"]).default("note"), title: z.string().optional() }),
+      inputSchema: z.object({ personId: z.string().uuid(), text: z.string().min(1), kind: z.enum(NOTE_KINDS).default("note"), title: z.string().optional() }),
       execute: async ({ personId, text, kind, title }) => {
         const n = await createNote(ownerId, { personId, title: title ?? null, contentJson: null, contentMd: text, contentText: text, kind, pinned: false, mentionIds: [] }, { kind: "chat", ref: "assistant" });
         return { ok: true, noteId: n.id, url: `/people/${personId}/notes/${n.id}` };
@@ -134,7 +202,8 @@ export function networkTools(ownerId: string) {
         const d = new Date(dueAt);
         if (Number.isNaN(d.getTime())) return { error: "Invalid dueAt" };
         const r = await createReminder(ownerId, { personId, dueAt: d.toISOString(), message: message ?? null, recurrence, recurrenceDays: null });
-        return { ok: true, reminderId: r?.id, due: r?.dueAt };
+        if (!r) return { error: "Unknown person" };
+        return { ok: true, reminderId: r.id, due: r.dueAt };
       },
     }),
 
@@ -148,33 +217,34 @@ export function networkTools(ownerId: string) {
         metContext: z.string().optional(),
         metDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
         categories: z.array(z.string()).default([]).describe("Category names"),
+        activities: z.array(z.string()).default([]).describe("Activity names, e.g. Football, Dinners"),
+        tags: z.array(z.string()).default([]),
         warmth: z.enum(WARMTH).default("active"),
         circle: z.enum(CIRCLES).optional(),
-        hobbies: z.array(z.enum(HOBBIES)).default([]),
         introducedByPersonId: z.string().uuid().optional(),
       }),
       execute: async (input) => {
-        const cats = await listCategories(ownerId);
-        const categoryIds = input.categories.map((n) => cats.find((c) => c.name.toLowerCase() === n.toLowerCase() || c.slug === n.toLowerCase())?.id).filter((x): x is string => !!x);
+        const names = await nameMaps(ownerId);
         let homeLocation = null;
         if (input.city) {
           const [c] = await searchCities(input.city, 1);
           if (c) homeLocation = { cityId: c.id, name: c.name, admin: c.admin, country: c.country, countryCode: c.countryCode, lat: c.lat, lng: c.lng, timezone: c.timezone };
         }
-        const p = await createPerson(ownerId, {
-          displayName: input.name, headline: input.role ?? null, company: input.company ?? null, homeLocation, metContext: input.metContext ?? null, metAt: input.metDate ?? null, metLocation: null,
-          warmth: input.warmth, circle: input.circle ?? null, hobbies: input.hobbies, hobbiesOther: null, categoryIds, introducedById: input.introducedByPersonId ?? null,
-          firstName: null, lastName: null, email: null, phone: null, linkedin: null, xHandle: null, instagram: null, website: null, birthday: null, languages: [], interests: [], howICanHelp: null, whatICanAsk: null, followupCadenceDays: null, nextFollowupAt: null,
-        }, { kind: "chat", ref: "assistant" });
-        return { ok: true, personId: p.id, url: `/people/${p.id}`, city: p.homeLocation?.name ?? null };
+        const person = await createPerson(
+          ownerId,
+          {
+            displayName: input.name, headline: input.role ?? null, company: input.company ?? null, homeLocation, metContext: input.metContext ?? null, metAt: input.metDate ?? null, metLocation: null,
+            warmth: input.warmth, circle: input.circle ?? null, hobbiesOther: null,
+            categoryIds: idsFor(input.categories, names.categories) ?? [],
+            activityIds: idsFor(input.activities, names.activities) ?? [],
+            tagNames: input.tags,
+            introducedById: input.introducedByPersonId ?? null,
+            firstName: null, lastName: null, email: null, phone: null, linkedin: null, xHandle: null, instagram: null, website: null, birthday: null, languages: [], interests: [], howICanHelp: null, whatICanAsk: null, followupCadenceDays: null, nextFollowupAt: null,
+          },
+          { kind: "chat", ref: "assistant" },
+        );
+        return { ok: true, personId: person.id, url: `/people/${person.id}`, city: person.homeLocation?.name ?? null };
       },
     }),
   };
-}
-
-function excerpt(text: string, q: string, span = 160) {
-  const i = text.toLowerCase().indexOf(q.toLowerCase());
-  if (i < 0) return text.slice(0, span);
-  const start = Math.max(0, i - span / 2);
-  return (start > 0 ? "…" : "") + text.slice(start, start + span) + (start + span < text.length ? "…" : "");
 }
