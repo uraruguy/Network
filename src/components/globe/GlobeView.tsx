@@ -1,183 +1,258 @@
 "use client";
+/**
+ * /globe — an Apple-Maps-style planet of the people you know.
+ *
+ * URL is the source of truth: people filters (`?q=&cat=&w=&act=&tag=`, shared with /people and
+ * /graph) and the selected city (`?city=<locationId>`). Updates go through
+ * `history.replaceState`, which Next syncs into `useSearchParams` — no router round trip and no
+ * state-mirroring effects. The map itself is a client-only chunk (MapCanvas).
+ */
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { AnimatePresence, motion } from "motion/react";
-import { ChevronRight, Route, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Avatar } from "@/components/glass/Avatar";
-import { Chip } from "@/components/glass/Chip";
-import { CategoryIcon } from "@/components/people/CategoryIcon";
-import { WarmthDot } from "@/components/people/WarmthPicker";
-import { WARMTH, type Warmth } from "@/lib/constants";
-import { ViewSwitch } from "./ViewSwitch";
-import { useGlobe, useProfile } from "@/lib/queries/misc";
-import { useCategories } from "@/lib/queries/people";
-import { cn, flag, WARMTH_META } from "@/lib/utils";
-import { useDark } from "@/lib/theme";
+import { useSearchParams } from "next/navigation";
+import { MapPinOff, SearchX, UserPlus } from "lucide-react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import type { PaddingOptions } from "maplibre-gl";
+import { FilterBar } from "@/components/filters/FilterBar";
+import { buttonVariants, GlassButton } from "@/components/glass/GlassButton";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { EMPTY_FILTERS, filterPeople, filtersFromParams, filtersToParams, isEmpty, type Facet, type PeopleFilters } from "@/lib/filters/people-filters";
+import { useIsPhone } from "@/lib/media";
+import { useProfile } from "@/lib/queries/misc";
+import { usePeopleIndex } from "@/lib/queries/people";
+import { useActivities } from "@/lib/queries/taxonomy";
+import { cn } from "@/lib/utils";
+import { CityPanel, type ActivityLookup } from "./CityPanel";
+import { GlobeControls } from "./GlobeControls";
+import { GlobeSkeleton } from "./GlobeSkeleton";
+import { MapHeader } from "./MapHeader";
+import { PersonPeek } from "./PersonPeek";
+import { buildArcCollection, buildCityData, citiesBounds, peopleCentroid, type LngLatPair } from "./globe-data";
+import type { MapHandle } from "./MapCanvas";
 
-const NetworkGlobe = dynamic(() => import("./NetworkGlobe").then((m) => m.NetworkGlobe), {
-  ssr: false,
-  loading: () => <GlobeSkeleton />,
-});
+const MapCanvas = dynamic(() => import("./MapCanvas"), { ssr: false, loading: () => <GlobeSkeleton /> });
 
-function GlobeSkeleton() {
-  return (
-    <div className="grid h-full w-full place-items-center">
-      <div className="h-[56vmin] w-[56vmin] animate-pulse rounded-full bg-accent/15 blur-sm" />
-    </div>
-  );
+/** The city facet is the globe's selection, so the filter bar offers everything else. */
+const GLOBE_FACETS: Facet[] = ["category", "warmth", "activity", "tag"];
+const FALLBACK_CENTER: LngLatPair = [14.5, 46];
+const CITY_ZOOM = 10.5;
+const HOME_ZOOM = 9;
+const PANEL_WIDTH = 360;
+
+/** Write the URL in place: filters (minus the city facet) + the selected city. */
+function writeUrl(filters: PeopleFilters, city: string | null) {
+  const next = filtersToParams({ ...filters, locationIds: [] }, new URLSearchParams(window.location.search));
+  if (city) next.set("city", city);
+  else next.delete("city");
+  const qs = next.toString();
+  window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
 }
+
+const plural = (n: number, one: string, many: string) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 
 export function GlobeView() {
   const params = useSearchParams();
-  const router = useRouter();
-  const { data: entries = [], isPending } = useGlobe();
-  const { data: profile } = useProfile();
-  const { data: cats = [] } = useCategories();
-  const [category, setCategory] = useState<string | null>(null);
-  const [warmth, setWarmth] = useState<Warmth | null>(null);
-  const [arcs, setArcs] = useState(false);
-  const [selected, setSelected] = useState<string | null>(params.get("city"));
-  const dark = useDark();
-  const box = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ w: 0, h: 0 });
+  const filters = useMemo<PeopleFilters>(() => ({ ...filtersFromParams(new URLSearchParams(params.toString())), locationIds: [] }), [params]);
+  const selectedId = params.get("city");
 
+  const peopleQuery = usePeopleIndex();
+  const profileQuery = useProfile();
+  const { data: activityRows } = useActivities();
+  const people = useMemo(() => peopleQuery.data ?? [], [peopleQuery.data]);
+  const filtered = useMemo(() => filterPeople(people, filters), [people, filters]);
+  const { collection, groups, withoutCity } = useMemo(() => buildCityData(filtered), [filtered]);
+  const activities = useMemo<ActivityLookup>(() => new Map((activityRows ?? []).map((a) => [a.id, a])), [activityRows]);
+
+  const homeLoc = profileQuery.data?.homeLocation ?? null;
+  const home = useMemo(() => (homeLoc ? { lat: homeLoc.lat, lng: homeLoc.lng } : null), [homeLoc]);
+  const [arcsOn, setArcsOn] = useState(false);
+  const arcs = useMemo(() => (arcsOn && home ? buildArcCollection(home, groups.values()) : null), [arcsOn, home, groups]);
+
+  const selected = selectedId ? (groups.get(selectedId) ?? null) : null;
+  const single = selected && selected.people.length === 1 ? selected : null;
+  const multi = selected && selected.people.length > 1 ? selected : null;
+
+  const phone = useIsPhone();
+  const root = useRef<HTMLDivElement>(null);
+  const header = useRef<HTMLDivElement>(null);
+  const chrome = useRef<HTMLDivElement>(null);
+  const handle = useRef<MapHandle | null>(null);
+  const [insets, setInsets] = useState({ top: 96, bottom: 0, width: 0, height: 0 });
+  const [mapReady, setMapReady] = useState(false);
+
+  // Overlay geometry → camera padding (the globe centres in what the chrome leaves free).
   useEffect(() => {
-    const el = box.current;
-    if (!el) return;
-    const ro = new ResizeObserver(([e]) => {
-      const { width, height } = e!.contentRect;
-      setSize({ w: Math.round(width), h: Math.round(height) });
-    });
-    ro.observe(el);
+    const r = root.current, h = header.current, c = chrome.current;
+    if (!r || !h || !c) return;
+    const measure = () => {
+      const top = Math.round(h.getBoundingClientRect().bottom - r.getBoundingClientRect().top);
+      const bottom = Math.round(c.getBoundingClientRect().height);
+      setInsets((prev) =>
+        prev.top === top && prev.bottom === bottom && prev.width === r.clientWidth && prev.height === r.clientHeight
+          ? prev
+          : { top, bottom, width: r.clientWidth, height: r.clientHeight },
+      );
+    };
+    const ro = new ResizeObserver(measure);
+    ro.observe(r);
+    ro.observe(h);
+    ro.observe(c);
     return () => ro.disconnect();
   }, []);
 
+  const padding = (panel: "none" | "city" | "peek" = "none"): PaddingOptions => {
+    const base = { top: insets.top + 12, bottom: insets.bottom + 12, left: 16, right: 16 };
+    if (panel === "none") return base;
+    if (phone) return { ...base, bottom: panel === "city" ? Math.round(insets.height * 0.35) + 12 : insets.bottom + 230 };
+    return { ...base, right: PANEL_WIDTH + 40 };
+  };
+
+  const planetCenter = (): LngLatPair => (home ? [home.lng, home.lat] : (peopleCentroid(groups.values()) ?? FALLBACK_CENTER));
+
+  /* ---------- selection ---------- */
+  const flyTo = (id: string) => {
+    const g = groups.get(id);
+    if (!g) return;
+    handle.current?.flyToCity(g.location, { zoom: CITY_ZOOM, padding: padding(g.people.length === 1 ? "peek" : "city") });
+  };
+  const selectCity = (id: string | null) => {
+    writeUrl(filters, id);
+    if (id) flyTo(id);
+  };
+
+  // Deep link (`/globe?city=…`): fly there once the map and the people are in.
+  const initialFly = useRef(false);
+  const flyToInitial = useEffectEvent(() => {
+    initialFly.current = true;
+    if (selectedId && groups.has(selectedId)) flyTo(selectedId);
+  });
   useEffect(() => {
-    const url = selected ? `/globe?city=${selected}` : "/globe";
-    router.replace(url, { scroll: false });
-  }, [selected, router]);
+    if (mapReady && peopleQuery.isSuccess && !initialFly.current) flyToInitial();
+  }, [mapReady, peopleQuery.isSuccess]);
 
-  const filtered = useMemo(
-    () =>
-      entries
-        .map((e) => ({
-          ...e,
-          people: e.people.filter((p) => (!category || p.categoryIds.includes(category)) && (!warmth || p.warmth === warmth)),
-        }))
-        .filter((e) => e.people.length > 0),
-    [entries, category, warmth],
-  );
+  /* ---------- filters ---------- */
+  const fitTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(fitTimer.current), []);
+  const onFiltersChange = (next: PeopleFilters) => {
+    const keepCity = selectedId && filterPeople(people, next).some((p) => p.homeLocation?.id === selectedId) ? selectedId : null;
+    writeUrl(next, keepCity);
+    clearTimeout(fitTimer.current);
+    if (isEmpty({ ...next, locationIds: [] }) || keepCity) return;
+    // Show where the matches are (debounced so typing a search doesn't swing the camera).
+    fitTimer.current = setTimeout(() => {
+      const bounds = citiesBounds(buildCityData(filterPeople(people, next)).groups.values());
+      if (bounds) handle.current?.fitPeople(bounds, { padding: padding(), maxZoom: 6 });
+    }, 450);
+  };
+  const clearFilters = () => onFiltersChange(EMPTY_FILTERS);
 
-  const sel = filtered.find((e) => e.location.id === selected) ?? null;
-  const totalPeople = filtered.reduce((n, e) => n + e.people.length, 0);
-  const countries = new Set(filtered.map((e) => e.location.countryCode ?? e.location.country)).size;
-  const home = profile?.homeLocation ? { lat: profile.homeLocation.lat, lng: profile.homeLocation.lng } : null;
+  /* ---------- moving flag (glass overlays drop their blur while the map moves) ---------- */
+  const onMovingChange = (moving: boolean) => {
+    const el = root.current;
+    if (el && el.hasAttribute("data-map-moving") !== moving) el.toggleAttribute("data-map-moving", moving);
+  };
+
+  const dataReady = !peopleQuery.isPending && !profileQuery.isPending;
+  const onMap = filtered.length - withoutCity;
+  const located = useMemo(() => people.reduce((n, p) => n + (p.homeLocation ? 1 : 0), 0), [people]);
+  const filtering = !isEmpty(filters);
+  const cityCount = plural(groups.size, "city", "cities");
+  const subtitle = peopleQuery.isPending
+    ? "Loading…"
+    : filtering
+      ? `${onMap.toLocaleString()} of ${plural(located, "person", "people")} · ${cityCount}`
+      : `${plural(onMap, "person", "people")} · ${cityCount}`;
 
   return (
-    <div className="relative h-dvh w-full overflow-hidden">
-      <div ref={box} className="absolute inset-0 touch-none">
-        {size.w > 0 && !isPending && (
-          <NetworkGlobe entries={filtered} home={home} selectedId={selected} onSelect={setSelected} showArcs={arcs} dark={dark} width={size.w} height={size.h} />
+    <div ref={root} className="relative h-dvh w-full overflow-hidden bg-bg">
+      {dataReady ? (
+        <MapCanvas
+          handle={handle}
+          cities={collection}
+          groups={groups}
+          arcs={arcs}
+          home={home}
+          selectedId={selected ? selectedId : null}
+          initialCenter={planetCenter()}
+          padding={padding()}
+          rotationPaused={!!selected}
+          onCityPress={selectCity}
+          onMovingChange={onMovingChange}
+          onReady={() => setMapReady(true)}
+        />
+      ) : (
+        <GlobeSkeleton />
+      )}
+
+      {/* Bottom chrome probe: the phone tab bar's height (0 on desktop). */}
+      <div ref={chrome} aria-hidden className="pointer-events-none invisible absolute inset-x-0 bottom-0 h-[var(--chrome-bottom)]" />
+
+      <MapHeader ref={header} title="Globe" subtitle={subtitle}>
+        <FilterBar variant="map" filters={filters} onChange={onFiltersChange} people={people} facets={GLOBE_FACETS} showSearch />
+        {withoutCity > 0 && !peopleQuery.isPending && (
+          <Link
+            href="/people"
+            className="glass-map specular pointer-events-auto inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-footnote font-medium text-fg-2 hover:text-fg"
+          >
+            <MapPinOff className="size-3.5" aria-hidden />
+            {plural(withoutCity, "person", "people")} without a city
+          </Link>
         )}
-      </div>
+      </MapHeader>
 
-      {/* Top overlay */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 p-4 pt-[calc(12px+var(--sat))] lg:p-8">
-        <div className="flex items-start justify-between gap-3">
-          <div className="pointer-events-auto glass specular rounded-[22px] px-4 py-2.5">
-            <h1 className="text-[22px] font-bold tracking-tight leading-none">Globe</h1>
-            <p className="mt-1 text-[12.5px] text-fg-2">
-              {totalPeople} {totalPeople === 1 ? "person" : "people"} · {filtered.length} {filtered.length === 1 ? "city" : "cities"} · {countries} {countries === 1 ? "country" : "countries"}
-            </p>
-          </div>
-          <ViewSwitch
-            trailing={
-              <button
-                onClick={() => setArcs((a) => !a)}
-                className={cn("pressable glass specular grid h-11 w-11 place-items-center rounded-full", arcs ? "text-accent-strong" : "text-fg-3")}
-                aria-label="Toggle arcs from home"
-                title="Arcs from home base"
-              >
-                <Route size={18} />
-              </button>
-            }
-          />
-        </div>
-        <div className="pointer-events-auto no-scrollbar mt-3 flex gap-2 overflow-x-auto pb-1">
-          {cats.map((c) => (
-            <button key={c.id} className="pressable shrink-0" onClick={() => setCategory(category === c.id ? null : c.id)}>
-              <Chip color={c.color} active={category === c.id} className="glass">
-                <CategoryIcon name={c.icon} size={13} /> {c.name}
-              </Chip>
-            </button>
-          ))}
-          <span className="mx-0.5 w-px shrink-0 bg-fg/10" />
-          {WARMTH.map((w) => (
-            <button key={w} className="pressable shrink-0" onClick={() => setWarmth(warmth === w ? null : w)}>
-              <Chip active={warmth === w} className="glass">
-                <span className="h-2 w-2 rounded-full" style={{ background: WARMTH_META[w].color }} /> {WARMTH_META[w].label}
-              </Chip>
-            </button>
-          ))}
-        </div>
-      </div>
+      <GlobeControls
+        className={cn(
+          "absolute right-3 bottom-[calc(var(--chrome-bottom)+12px)] z-10 transition-[right,opacity] duration-300 ease-ios lg:right-6 lg:bottom-6",
+          !phone && multi && "right-[calc(360px+24px)] lg:right-[calc(360px+40px)]",
+          !phone && single && "sm:right-[calc(340px+24px)] lg:right-[calc(340px+40px)]",
+          // On phones the sheet / card owns the bottom of the screen.
+          phone && selected && "pointer-events-none opacity-0",
+        )}
+        onZoomIn={() => handle.current?.zoomBy(1)}
+        onZoomOut={() => handle.current?.zoomBy(-1)}
+        onHome={home ? () => handle.current?.flyToCity(home, { zoom: HOME_ZOOM, padding: padding() }) : null}
+        onPlanet={() => {
+          writeUrl(filters, null);
+          handle.current?.resetPlanet(planetCenter(), padding());
+        }}
+        arcs={arcsOn}
+        onArcsChange={home ? setArcsOn : null}
+      />
 
-      {/* Empty state */}
-      {!isPending && entries.length === 0 && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-[calc(100px+var(--sab))] z-10 flex justify-center px-6 lg:bottom-10">
-          <div className="pointer-events-auto glass specular max-w-sm rounded-[var(--r-lg)] px-5 py-4 text-center">
-            <p className="text-[15px] font-semibold">No cities yet</p>
-            <p className="mt-1 text-[13.5px] text-fg-2">Give people a “Lives in” city and they’ll light up here.</p>
-            <Link href="/people?new=1" className="mt-3 inline-flex h-9 items-center rounded-full bg-accent px-4 text-[14px] font-medium text-accent-fg">Add a person</Link>
+      <CityPanel group={multi} activities={activities} phone={phone} onClose={() => selectCity(null)} top={insets.top + 8} />
+      <PersonPeek group={single} activities={activities} onClose={() => selectCity(null)} top={insets.top + 8} />
+
+      {dataReady && groups.size === 0 && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-[calc(var(--chrome-bottom)+24px)] z-10 flex justify-center px-4 lg:bottom-10">
+          <div className="glass-map specular pointer-events-auto w-full max-w-sm rounded-xl px-5">
+            {filtering && located > 0 ? (
+              <EmptyState
+                compact
+                icon={<SearchX />}
+                title="No one here matches"
+                description="Nobody with a home city fits these filters."
+                action={
+                  <GlassButton variant="soft" size="sm" onClick={clearFilters}>
+                    Clear filters
+                  </GlassButton>
+                }
+              />
+            ) : (
+              <EmptyState
+                compact
+                icon={<UserPlus />}
+                title="No cities yet"
+                description="Give people a “Lives in” city and they’ll appear on the globe."
+                action={
+                  <Link href="/people?new=1" className={buttonVariants({ variant: "primary", size: "sm" })}>
+                    Add a person
+                  </Link>
+                }
+              />
+            )}
           </div>
         </div>
       )}
-
-      {/* Selected city panel */}
-      <AnimatePresence>
-        {sel && (
-          <motion.aside
-            key={sel.location.id}
-            initial={{ opacity: 0, y: 24 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 24 }}
-            transition={{ type: "spring", stiffness: 420, damping: 36 }}
-            className="absolute inset-x-3 bottom-[calc(84px+var(--sab))] z-20 max-h-[46dvh] lg:inset-x-auto lg:right-8 lg:top-28 lg:bottom-10 lg:w-[360px] lg:max-h-none"
-          >
-            <div className="glass-strong specular flex max-h-full flex-col overflow-hidden rounded-[var(--r-xl)]">
-              <div className="flex items-start justify-between gap-3 px-5 pt-4 pb-3">
-                <div>
-                  <h2 className="text-[20px] font-bold tracking-tight leading-tight">
-                    {flag(sel.location.countryCode)} {sel.location.name}
-                  </h2>
-                  <p className="text-[13px] text-fg-2">{sel.location.country} · {sel.people.length} {sel.people.length === 1 ? "person" : "people"}</p>
-                </div>
-                <button onClick={() => setSelected(null)} aria-label="Close" className="pressable grid h-8 w-8 shrink-0 place-items-center rounded-full bg-fg/6 text-fg-2">
-                  <X size={15} />
-                </button>
-              </div>
-              <ul className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-                {sel.people.map((p) => (
-                  <li key={p.id}>
-                    <Link href={`/people/${p.id}`} className="pressable flex items-center gap-3 rounded-[16px] px-3 py-2 hover:bg-white/50 dark:hover:bg-white/5">
-                      <Avatar name={p.displayName} src={p.avatarUrl} size={38} />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 truncate text-[15px] font-semibold">
-                          {p.displayName} <WarmthDot warmth={p.warmth} />
-                        </div>
-                        <p className="truncate text-[13px] text-fg-2">{[p.headline, p.company].filter(Boolean).join(" · ") || "—"}</p>
-                      </div>
-                      <ChevronRight size={16} className="text-fg-4" />
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </motion.aside>
-        )}
-      </AnimatePresence>
     </div>
   );
 }
