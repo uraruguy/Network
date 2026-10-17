@@ -13,21 +13,9 @@ import { useGraph, useProfile } from "@/lib/queries/misc";
 import { useCategories } from "@/lib/queries/people";
 import { CIRCLES, type Circle } from "@/lib/constants";
 import { CIRCLE_META, cn, flag } from "@/lib/utils";
+import { useDark } from "@/lib/theme";
 
 const NetworkGraph = dynamic(() => import("./NetworkGraph").then((m) => m.NetworkGraph), { ssr: false });
-
-function useDark() {
-  const [dark, setDark] = useState(false);
-  useEffect(() => {
-    const el = document.documentElement;
-    const update = () => setDark(el.classList.contains("dark"));
-    update();
-    const mo = new MutationObserver(update);
-    mo.observe(el, { attributes: true, attributeFilter: ["class"] });
-    return () => mo.disconnect();
-  }, []);
-  return dark;
-}
 
 export function GraphView() {
   const { data, isPending } = useGraph();

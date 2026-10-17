@@ -14,6 +14,7 @@ import { ViewSwitch } from "./ViewSwitch";
 import { useGlobe, useProfile } from "@/lib/queries/misc";
 import { useCategories } from "@/lib/queries/people";
 import { cn, flag, WARMTH_META } from "@/lib/utils";
+import { useDark } from "@/lib/theme";
 
 const NetworkGlobe = dynamic(() => import("./NetworkGlobe").then((m) => m.NetworkGlobe), {
   ssr: false,
@@ -26,19 +27,6 @@ function GlobeSkeleton() {
       <div className="h-[56vmin] w-[56vmin] animate-pulse rounded-full bg-accent/15 blur-sm" />
     </div>
   );
-}
-
-function useDark() {
-  const [dark, setDark] = useState(false);
-  useEffect(() => {
-    const el = document.documentElement;
-    const update = () => setDark(el.classList.contains("dark"));
-    update();
-    const mo = new MutationObserver(update);
-    mo.observe(el, { attributes: true, attributeFilter: ["class"] });
-    return () => mo.disconnect();
-  }, []);
-  return dark;
 }
 
 export function GlobeView() {

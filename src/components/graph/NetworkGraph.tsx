@@ -3,6 +3,7 @@ import ForceGraph2D, { type ForceGraphMethods, type LinkObject, type NodeObject 
 import { useEffect, useMemo, useRef } from "react";
 import type { GraphLink, GraphNode } from "@/lib/data/graph";
 import { hueFromString, initials, WARMTH_META } from "@/lib/utils";
+import { readCssColor } from "@/lib/design/useResolvedTokens";
 
 type N = NodeObject<GraphNode & { me?: boolean }>;
 type L = LinkObject<GraphNode & { me?: boolean }, GraphLink>;
@@ -18,7 +19,8 @@ type Props = {
   height: number;
 };
 
-const CSS = (v: string) => (typeof window === "undefined" ? "#0fb5ba" : getComputedStyle(document.documentElement).getPropertyValue(v).trim() || "#0fb5ba");
+// Tokens are OKLCH now; resolve to hex so `${accent}33` alpha suffixing keeps working.
+const CSS = (v: string) => readCssColor(v) ?? "#39abaa";
 
 export function NetworkGraph({ nodes, links, meName, selectedId, onSelect, dark, width, height }: Props) {
   const ref = useRef<ForceGraphMethods<N, L> | undefined>(undefined);
