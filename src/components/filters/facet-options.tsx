@@ -31,6 +31,55 @@ export type FacetOptions = Record<Facet, FacetOption[]>;
 /** Long, open-ended facets get a search field and selected-first ordering. */
 export const SEARCHABLE: Record<Facet, boolean> = { category: false, warmth: false, activity: true, tag: true, city: true };
 
+/**
+ * Display order for a facet's options, captured when a picker opens so rows don't jump while you
+ * tick: categories/warmth keep their natural order; activities keep the user's order with
+ * selected first and empty ones last; tags and cities go selected first, then most people.
+ */
+export function freezeOrder(facet: Facet, options: readonly FacetOption[], selected: readonly string[], counts: ReadonlyMap<string, number>): Map<string, number> {
+  const sel = new Set(selected);
+  const n = (o: FacetOption) => counts.get(o.value) ?? 0;
+  const bySelected = (a: FacetOption, b: FacetOption) => Number(sel.has(b.value)) - Number(sel.has(a.value));
+  const sorted =
+    facet === "activity"
+      ? [...options].sort((a, b) => bySelected(a, b) || Number(n(b) > 0) - Number(n(a) > 0))
+      : facet === "tag" || facet === "city"
+        ? [...options].sort((a, b) => bySelected(a, b) || n(b) - n(a))
+        : options;
+  return new Map(sorted.map((o, i) => [o.value, i]));
+}
+
+const UNKNOWN_LABEL: Record<Facet, string> = { category: "Unknown category", warmth: "Unknown", activity: "Unknown activity", tag: "Unknown tag", city: "Unknown city" };
+
+/**
+ * `options` plus a row for every selected value that no longer exists (a deleted tag in an old
+ * link), so it can still be unticked instead of silently filtering everyone out.
+ */
+export function withMissingSelected(facet: Facet, options: readonly FacetOption[], selected: readonly string[]): readonly FacetOption[] {
+  const known = new Set(options.map((o) => o.value));
+  const missing = selected.filter((v) => !known.has(v));
+  if (!missing.length) return options;
+  return [
+    ...options,
+    ...missing.map((value) => ({
+      value,
+      label: UNKNOWN_LABEL[facet],
+      search: normalizeForSearch(UNKNOWN_LABEL[facet]),
+      leading: (
+        <span aria-hidden className="grid size-6 shrink-0 place-items-center">
+          <span className="size-1.5 rounded-full bg-fg-4" />
+        </span>
+      ),
+    })),
+  ];
+}
+
+/** `options` in a frozen order (values that appeared after opening go last, in their own order). */
+export function inOrder(options: readonly FacetOption[], order: ReadonlyMap<string, number>): FacetOption[] {
+  const at = (o: FacetOption) => order.get(o.value) ?? order.size;
+  return [...options].sort((a, b) => at(a) - at(b));
+}
+
 const opt = (o: Omit<FacetOption, "search">): FacetOption => ({ ...o, search: normalizeForSearch(`${o.label} ${o.detail ?? ""}`) });
 
 export function WarmthSwatch({ color, className }: { color: string; className?: string }) {

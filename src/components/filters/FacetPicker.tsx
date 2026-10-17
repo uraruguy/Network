@@ -7,7 +7,7 @@ import { normalizeForSearch } from "@/components/ui/search";
 import { FACET_LABEL, facetCounts, facetSelection, withFacet, type Facet, type PeopleFilters, type PeopleRow } from "@/lib/filters/people-filters";
 import { useIsPhone } from "@/lib/media";
 import { cn } from "@/lib/utils";
-import { SEARCHABLE, selectionLabel, type FacetOption } from "./facet-options";
+import { freezeOrder, inOrder, SEARCHABLE, selectionLabel, withMissingSelected, type FacetOption } from "./facet-options";
 import { FilterPill } from "./FilterPill";
 
 export type FacetListProps = {
@@ -42,20 +42,15 @@ function onListKeyDown(e: KeyboardEvent<HTMLElement>) {
  * Long facets (activities, tags, cities) get a diacritic-insensitive search; their order is
  * frozen when the list opens (selected first, then most people) so rows don't jump while you tick.
  */
-export function FacetList({ facet, options, filters, onChange, people, touch, className }: FacetListProps) {
+export function FacetList({ facet, options: known, filters, onChange, people, touch, className }: FacetListProps) {
   const selected = facetSelection(filters, facet);
+  const options = useMemo(() => withMissingSelected(facet, known, selected), [facet, known, selected]);
   const counts = useMemo(() => facetCounts(people, filters, facet), [people, filters, facet]);
   const [query, setQuery] = useState("");
   const searchable = SEARCHABLE[facet] && options.length > SEARCH_THRESHOLD;
 
-  // Long facets: order captured once per mount (selected → has matches → none). Short ones keep their natural order.
-  const [order] = useState(() => {
-    const sel = new Set(selected);
-    const rank = (o: FacetOption) => (sel.has(o.value) ? 0 : (counts.get(o.value) ?? 0) > 0 ? 1 : 2);
-    const frozen = SEARCHABLE[facet] ? [...options].sort((a, b) => rank(a) - rank(b)) : options;
-    return new Map(frozen.map((o, i) => [o.value, i]));
-  });
-  const ordered = useMemo(() => [...options].sort((a, b) => (order.get(a.value) ?? 1e6) - (order.get(b.value) ?? 1e6)), [options, order]);
+  const [order] = useState(() => freezeOrder(facet, options, selected, counts));
+  const ordered = useMemo(() => inOrder(options, order), [options, order]);
   const terms = normalizeForSearch(query).split(" ").filter(Boolean);
   const visible = terms.length ? ordered.filter((o) => terms.every((t) => o.search.includes(t))) : ordered;
 
@@ -70,6 +65,10 @@ export function FacetList({ facet, options, filters, onChange, people, touch, cl
         <SearchField
           value={query}
           onChange={setQuery}
+          // First Escape clears the search; only an empty field lets Escape close the popover.
+          onKeyDown={(e) => {
+            if (e.key === "Escape" && query) e.stopPropagation();
+          }}
           placeholder={`Search ${FACET_LABEL[facet].toLowerCase()}`}
           aria-label={`Search ${FACET_LABEL[facet].toLowerCase()}`}
           className={cn("mb-2 shrink-0", touch ? "" : "h-9")}

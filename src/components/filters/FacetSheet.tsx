@@ -20,7 +20,7 @@ import {
   type PeopleRow,
 } from "@/lib/filters/people-filters";
 import { cn } from "@/lib/utils";
-import { SEARCHABLE, type FacetOption, type FacetOptions } from "./facet-options";
+import { freezeOrder, inOrder, SEARCHABLE, withMissingSelected, type FacetOption, type FacetOptions } from "./facet-options";
 
 export type FacetSheetProps = {
   open: boolean;
@@ -75,7 +75,7 @@ export function FacetSheet({ open, onOpenChange, filters, onChange, people, opti
 
 function FacetSection({
   facet,
-  options,
+  options: known,
   filters,
   onChange,
   people,
@@ -87,22 +87,14 @@ function FacetSection({
   people: readonly PeopleRow[];
 }) {
   const selected = facetSelection(filters, facet);
+  const options = withMissingSelected(facet, known, selected);
   const counts = useMemo(() => facetCounts(people, filters, facet), [people, filters, facet]);
   const [expanded, setExpanded] = useState(false);
   const [query, setQuery] = useState("");
   const long = SEARCHABLE[facet] && options.length > COLLAPSED;
 
-  // Long facets: order frozen on mount (selected, then most people) so chips don't jump as you tap.
-  const [order] = useState(() => {
-    if (!SEARCHABLE[facet]) return null;
-    const sel = new Set(selected);
-    return new Map(
-      [...options]
-        .sort((a, b) => Number(sel.has(b.value)) - Number(sel.has(a.value)) || (counts.get(b.value) ?? 0) - (counts.get(a.value) ?? 0))
-        .map((o, i) => [o.value, i]),
-    );
-  });
-  const ordered = order ? [...options].sort((a, b) => (order.get(a.value) ?? 1e6) - (order.get(b.value) ?? 1e6)) : options;
+  const [order] = useState(() => freezeOrder(facet, options, selected, counts));
+  const ordered = inOrder(options, order);
   const terms = normalizeForSearch(query).split(" ").filter(Boolean);
   const matched = terms.length ? ordered.filter((o) => terms.every((t) => o.search.includes(t))) : ordered;
   const visible = long && !expanded && !terms.length ? matched.slice(0, COLLAPSED) : matched;
