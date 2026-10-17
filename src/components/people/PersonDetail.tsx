@@ -121,6 +121,12 @@ export function PersonDetail({ id }: { id: string }) {
   const [importing, setImporting] = useState(false);
   const nameRef = useRef<HTMLHeadingElement>(null);
 
+  // ?reminder=1 (deep link from elsewhere) opens the follow-up sheet once; drop it from the URL.
+  const deepLink = params.get("reminder") === "1";
+  useEffect(() => {
+    if (deepLink) router.replace(`/people/${id}`, { scroll: false });
+  }, [deepLink, id, router]);
+
   const head: Head | undefined = person ?? preview;
   const compact = useScrolledPast(nameRef, !!head);
 

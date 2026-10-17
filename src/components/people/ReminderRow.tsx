@@ -1,8 +1,9 @@
 "use client";
 import { addMonths, addWeeks, startOfDay, startOfWeek } from "date-fns";
-import { CalendarDays, Check, Clock, Pencil, Repeat, Trash2 } from "lucide-react";
+import { CalendarDays, Check, Clock, Pencil, Repeat, Trash2, UserRound } from "lucide-react";
 import { motion } from "motion/react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Avatar } from "@/components/glass/Avatar";
 import { dueLabel, fromDueAt, nextOccurrence, repeatLabel, toDueAt } from "@/components/followups/recurrence";
@@ -47,6 +48,7 @@ const snapshot = (r: AnyReminder): ReminderSnapshot => ({
  * edit. Long-press / right-click for Edit · Done · Delete.
  */
 export function ReminderRow({ r, showPerson = true, personName, className }: Props) {
+  const router = useRouter();
   const now = useNow();
   const writes = useReminderWrites();
   const [phase, setPhase] = useState<"idle" | "checked" | "folding">("idle");
@@ -133,6 +135,7 @@ export function ReminderRow({ r, showPerson = true, personName, className }: Pro
         items={[
           { label: "Edit", icon: <Pencil />, onSelect: () => setEditing(true) },
           { label: "Mark as done", icon: <Check />, onSelect: complete },
+          ...(showPerson && person ? [{ label: `Open ${first}`, icon: <UserRound />, onSelect: () => router.push(`/people/${person.id}`) }] : []),
           "separator",
           { label: "Delete", icon: <Trash2 />, destructive: true, onSelect: remove },
         ]}
