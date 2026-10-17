@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import { qcol } from "./sql";
 
@@ -95,6 +95,12 @@ export async function saveMessages(ownerId: string, threadId: string, messages: 
       });
     await tx.update(chatThreads).set({ updatedAt: new Date() }).where(and(eq(chatThreads.ownerId, ownerId), eq(chatThreads.id, threadId)));
   });
+}
+
+/** Removes specific messages of a thread (a regenerated answer replaces the old one). */
+export async function deleteMessages(ownerId: string, threadId: string, ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  await db.delete(chatMessages).where(and(eq(chatMessages.ownerId, ownerId), eq(chatMessages.threadId, threadId), inArray(chatMessages.id, ids)));
 }
 
 export async function deleteThread(ownerId: string, id: string): Promise<boolean> {

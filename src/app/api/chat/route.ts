@@ -16,7 +16,7 @@ import { buildSystem, type PromptPerson } from "@/lib/ai/prompt";
 import { CACHE_BREAKPOINT, chatModel, type ChatTier } from "@/lib/ai/provider";
 import { toAiSdkTools, type ToolCtx } from "@/lib/ai/tools";
 import { getOwner } from "@/lib/auth/server";
-import { createThread, getThread, saveMessages, type StoredMessage } from "@/lib/data/chat";
+import { createThread, deleteMessages, getThread, saveMessages, type StoredMessage } from "@/lib/data/chat";
 import { listPeopleIndex } from "@/lib/data/people";
 import { getProfile } from "@/lib/data/profile";
 import { listTaxonomy } from "@/lib/data/tags";
@@ -134,7 +134,11 @@ export async function POST(req: Request) {
   });
 
   // History: stored messages (trusted, but validated so one bad row can't break the thread).
-  const all = [...((thread?.messages ?? []) as UIMessage[]), userMessage];
+  // Re-sending a stored message (regenerate / retry) answers it again: what followed it is replaced.
+  const stored = (thread?.messages ?? []) as UIMessage[];
+  const resent = stored.findIndex((m) => m.id === userMessage.id);
+  const replaced = resent >= 0 ? stored.slice(resent + 1).map((m) => m.id) : [];
+  const all = [...(resent >= 0 ? stored.slice(0, resent) : stored), userMessage];
   const valid = await safeValidateUIMessages({ messages: all.slice(-HISTORY_WINDOW), tools });
   if (!valid.success) console.warn("[chat] stored history failed validation; answering without it", valid.error.message);
   const windowed = valid.success ? valid.data : [userMessage];
@@ -178,6 +182,7 @@ export async function POST(req: Request) {
           const meta = (responseMessage.metadata ?? null) as Record<string, unknown> | null;
           toSave.push({ id: UUID.test(responseMessage.id) ? responseMessage.id : crypto.randomUUID(), role: "assistant", parts: responseMessage.parts, usage: meta });
         }
+        await deleteMessages(ownerId, threadId, replaced);
         await saveMessages(ownerId, threadId, toSave);
       } catch (err) {
         console.error("[chat] failed to save messages", err);
