@@ -1,102 +1,180 @@
 "use client";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
-import { TaskList } from "@tiptap/extension-task-list";
-import { TaskItem } from "@tiptap/extension-task-item";
-import { Placeholder } from "@tiptap/extension-placeholder";
-import { Typography } from "@tiptap/extension-typography";
-import { Markdown } from "@tiptap/markdown";
-import { Bold, CheckSquare, Heading2, Italic, List, ListOrdered, Quote } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { BubbleMenu } from "@tiptap/react/menus";
+import { NodeSelection } from "@tiptap/pm/state";
+import { Bold, Italic, Link2, Strikethrough, Underline } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { toast } from "@/components/ui/Toast";
+import { useCoarsePointer } from "@/lib/media";
+import type { NoteDoc } from "@/lib/notes/cache";
+import { emptyNoteDoc, spaceParagraphs } from "@/lib/notes/doc";
+import { noteExtensions, type NoteEditorHooks } from "@/lib/notes/extensions";
+import { titleFromDoc } from "@/lib/notes/title";
+import type { NoteContent } from "@/lib/notes/useNoteAutosave";
 import { cn } from "@/lib/utils";
+import { DockedToolbar, InlineToolbar } from "./EditorToolbar";
+import { keepFocus, useFormatState } from "./FormatMenu";
+import { isKeyboardPrimed, releaseKeyboardPrime } from "./keyboard";
+import { LinkSheet } from "./LinkSheet";
 import "./editor.css";
 
-export type NoteContent = { json: unknown; md: string; text: string; title: string | null };
+export type { NoteContent } from "@/lib/notes/useNoteAutosave";
 
-type Props = {
-  initialJson: unknown | null;
-  initialMd?: string;
-  placeholder?: string;
+export type NoteEditorApi = {
+  editor: Editor;
+  /** Current content (JSON, Markdown, plain text, derived title). */
+  read: () => NoteContent;
+  focus: () => void;
+};
+
+export type NoteEditorProps = {
+  /** Initial content: `contentJson`, else `contentMd` (Markdown), else an empty Title line. */
+  note: Pick<NoteDoc, "contentJson" | "contentMd">;
+  /** Put the caret in the note right away (new notes). */
   autoFocus?: boolean;
-  onChange: (c: NoteContent) => void;
+  /** Called once with the editor and its initial content in place. */
+  onReady?: (api: NoteEditorApi) => void;
+  /** Called after every document change. */
+  onChange?: () => void;
+  /** Desktop toolbar target (the note page's navigation bar). */
+  toolbarSlot?: HTMLElement | null;
+  editable?: boolean;
   className?: string;
 };
 
-function extract(editor: Editor): NoteContent {
+const imagesDroppedToast = (n: number) =>
+  toast({ title: "Pasted text only", description: n === 1 ? "The image was left out." : `${n} images were left out.` });
+
+export function readContent(editor: Editor): NoteContent {
   const json = editor.getJSON();
-  const md = editor.getMarkdown();
-  const text = editor.getText({ blockSeparator: "\n" });
-  const first = json.content?.[0];
-  const title = first?.type === "heading" ? (editor.state.doc.firstChild?.textContent.trim() ?? null) : null;
-  return { json, md, text, title: title || null };
+  return { json, md: editor.getMarkdown(), text: editor.getText({ blockSeparator: "\n" }), title: titleFromDoc(json) };
 }
 
-export function NoteEditor({ initialJson, initialMd, placeholder = "Write freely. First line as a heading becomes the title.", autoFocus, onChange, className }: Props) {
-  const latest = useRef(onChange);
+/**
+ * The Apple Notes–style editor: Title/Heading/Subheading/Body, checklists, lists, quotes, links,
+ * clean paste. Phone: toolbar docked above the keyboard. Desktop: toolbar in the nav bar plus a
+ * bubble menu (B I U S Link) on selection. Content is uncontrolled after mount.
+ */
+export function NoteEditor({ note, autoFocus, onReady, onChange, toolbarSlot, editable = true, className }: NoteEditorProps) {
+  const coarse = useCoarsePointer();
+  const [linkOpen, setLinkOpen] = useState(false);
+  const callbacks = useRef({ onReady, onChange });
   useEffect(() => {
-    latest.current = onChange;
-  }, [onChange]);
+    callbacks.current = { onReady, onChange };
+  });
+
+  // Initial content is read once; the editor owns the document afterwards.
+  const [initial] = useState(() => {
+    if (note.contentJson) return { content: note.contentJson as Record<string, unknown>, type: "json" as const };
+    if (note.contentMd?.trim()) return { content: note.contentMd, type: "markdown" as const };
+    return { content: emptyNoteDoc() as Record<string, unknown>, type: "json" as const };
+  });
+  const [extensions] = useState(() => {
+    const hooks: NoteEditorHooks = { onLink: () => setLinkOpen(true), onImagesDropped: imagesDroppedToast };
+    return noteExtensions(() => hooks);
+  });
 
   const editor = useEditor({
     immediatelyRender: false,
     shouldRerenderOnTransaction: false,
-    autofocus: autoFocus ? "end" : false,
-    extensions: [
-      StarterKit.configure({
-        heading: { levels: [1, 2, 3] },
-        link: { openOnClick: true, autolink: true, defaultProtocol: "https" },
-      }),
-      TaskList,
-      TaskItem.configure({ nested: true }),
-      Placeholder.configure({ placeholder }),
-      Typography,
-      Markdown,
-    ],
-    content: (initialJson as Record<string, unknown> | null) ?? initialMd ?? "",
-    contentType: initialJson ? "json" : "markdown",
-    editorProps: { attributes: { class: "tiptap", spellcheck: "true" } },
-    onUpdate: ({ editor }) => latest.current(extract(editor)),
+    editable,
+    extensions,
+    content: initial.content,
+    contentType: initial.type,
+    autofocus: autoFocus ? (initial.type === "markdown" ? "end" : "start") : false,
+    editorProps: {
+      attributes: {
+        class: "tiptap note-prose",
+        spellcheck: "true",
+        autocapitalize: "sentences",
+        role: "textbox",
+        "aria-multiline": "true",
+        "aria-label": "Note",
+      },
+    },
+    onCreate: ({ editor }) => {
+      // Markdown paragraphs → Apple Notes lines with blank lines between (see spaceParagraphs).
+      if (initial.type === "markdown") {
+        const spaced = spaceParagraphs(editor.getJSON());
+        editor.chain().setMeta("addToHistory", false).setContent(spaced, { emitUpdate: false }).run();
+        if (autoFocus) editor.commands.focus("end");
+      }
+      callbacks.current.onReady?.({ editor, read: () => readContent(editor), focus: () => editor.commands.focus() });
+    },
+    onUpdate: () => callbacks.current.onChange?.(),
+    onFocus: () => isKeyboardPrimed() && releaseKeyboardPrime(),
   });
 
-  // iOS: keep the caret visible above the keyboard by scrolling the focused block into view.
+  // A primed iOS keyboard (see primeKeyboard) hands over to the editor once it exists.
+  useEffect(() => {
+    if (editor && autoFocus && isKeyboardPrimed()) editor.commands.focus(initial.type === "markdown" ? "end" : "start");
+  }, [editor, autoFocus, initial.type]);
+
+  // iOS: keep the caret visible above the keyboard.
   useEffect(() => {
     if (!editor) return;
-    const onSel = () => {
+    const onSelection = () => {
+      if (!editor.isFocused) return;
       const { from } = editor.state.selection;
-      const dom = editor.view.domAtPos(from).node as HTMLElement | Text;
-      const el = dom instanceof Text ? dom.parentElement : dom;
+      const at = editor.view.domAtPos(from).node;
+      const el = at instanceof Text ? at.parentElement : (at as HTMLElement);
       el?.scrollIntoView?.({ block: "nearest" });
     };
-    editor.on("selectionUpdate", onSel);
+    editor.on("selectionUpdate", onSelection);
     return () => {
-      editor.off("selectionUpdate", onSel);
+      editor.off("selectionUpdate", onSelection);
     };
   }, [editor]);
+
+  useEffect(() => {
+    editor?.setEditable(editable);
+  }, [editor, editable]);
 
   return (
     <div className={cn("relative", className)}>
       <EditorContent editor={editor} />
-      {editor && <Toolbar editor={editor} />}
+      {editor && editable && (
+        <>
+          {coarse ? <DockedToolbar editor={editor} /> : toolbarSlot && createPortal(<InlineToolbar editor={editor} />, toolbarSlot)}
+          {!coarse && <SelectionBubble editor={editor} onLink={() => setLinkOpen(true)} hidden={linkOpen} />}
+          <LinkSheet editor={editor} open={linkOpen} onOpenChange={setLinkOpen} />
+        </>
+      )}
     </div>
   );
 }
 
-function Toolbar({ editor }: { editor: Editor }) {
-  const btn = (label: string, Icon: React.ComponentType<{ size?: number }>, run: () => void) => (
-    <button type="button" aria-label={label} onMouseDown={(e) => { e.preventDefault(); run(); }} className="pressable grid h-9 w-9 place-items-center rounded-full text-fg-2 hover:bg-fg/6 active:bg-accent-soft">
-      <Icon size={17} />
-    </button>
-  );
+const bubbleButton =
+  "pressable grid size-9 place-items-center rounded-full text-fg-2 transition-colors duration-150 hover:bg-fill-2 hover:text-fg aria-pressed:bg-accent-soft aria-pressed:text-accent-text [&_svg]:size-[17px]";
+
+/** Desktop selection menu: B I U S · Link. */
+function SelectionBubble({ editor, onLink, hidden }: { editor: Editor; onLink: () => void; hidden: boolean }) {
+  const s = useFormatState(editor);
+  const items = [
+    { label: "Bold", icon: <Bold strokeWidth={2.6} />, active: s.bold, run: () => editor.chain().focus().toggleBold().run() },
+    { label: "Italic", icon: <Italic strokeWidth={2.4} />, active: s.italic, run: () => editor.chain().focus().toggleItalic().run() },
+    { label: "Underline", icon: <Underline strokeWidth={2.4} />, active: s.underline, run: () => editor.chain().focus().toggleUnderline().run() },
+    { label: "Strikethrough", icon: <Strikethrough strokeWidth={2.4} />, active: s.strike, run: () => editor.chain().focus().toggleStrike().run() },
+  ];
   return (
-    <div className="glass-strong specular sticky bottom-[calc(76px+var(--sab))] lg:bottom-4 mt-4 flex w-fit items-center gap-0.5 rounded-full px-1.5 py-1 mx-auto">
-      {btn("Heading", Heading2, () => editor.chain().focus().toggleHeading({ level: 2 }).run())}
-      {btn("Bold", Bold, () => editor.chain().focus().toggleBold().run())}
-      {btn("Italic", Italic, () => editor.chain().focus().toggleItalic().run())}
-      <span className="mx-0.5 h-5 w-px bg-fg/10" />
-      {btn("Bullet list", List, () => editor.chain().focus().toggleBulletList().run())}
-      {btn("Numbered list", ListOrdered, () => editor.chain().focus().toggleOrderedList().run())}
-      {btn("Checklist", CheckSquare, () => editor.chain().focus().toggleTaskList().run())}
-      {btn("Quote", Quote, () => editor.chain().focus().toggleBlockquote().run())}
-    </div>
+    <BubbleMenu
+      editor={editor}
+      options={{ placement: "top", offset: 8, flip: true, shift: { padding: 8 } }}
+      shouldShow={({ editor: e, state, from, to }) => !hidden && e.isFocused && from !== to && !(state.selection instanceof NodeSelection) && !e.isActive("codeBlock")}
+      className="z-[var(--z-chrome)]"
+    >
+      <div role="toolbar" aria-label="Selection formatting" {...keepFocus} className="glass-thick specular elevation-e3 flex items-center gap-0.5 rounded-full p-1">
+        {items.map((i) => (
+          <button key={i.label} type="button" aria-label={i.label} aria-pressed={i.active} onClick={i.run} className={bubbleButton}>
+            {i.icon}
+          </button>
+        ))}
+        <span aria-hidden className="mx-0.5 h-5 w-[0.5px] bg-separator" />
+        <button type="button" aria-label="Link" aria-pressed={s.link} onClick={onLink} className={bubbleButton}>
+          <Link2 />
+        </button>
+      </div>
+    </BubbleMenu>
   );
 }
