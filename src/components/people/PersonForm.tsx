@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 import { GlassButton } from "@/components/glass/GlassButton";
 import { Field, GlassInput, GlassTextarea } from "@/components/glass/GlassInput";
-import type { Circle, Hobby, Warmth } from "@/lib/db/schema";
+import type { Circle, Hobby, Warmth } from "@/lib/constants";
 import { CirclePicker } from "./CirclePicker";
 import { HobbyPicker } from "./HobbyPicker";
 import { PersonPicker } from "./PersonPicker";

@@ -2,7 +2,7 @@ import { tool } from "ai";
 import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/lib/db";
-import { CIRCLES, HOBBIES, WARMTH } from "@/lib/db/schema";
+import { CIRCLES, HOBBIES, WARMTH } from "@/lib/constants";
 import { listCategories } from "@/lib/data/categories";
 import { createNote, searchNotes } from "@/lib/data/notes";
 import { createPerson, getPerson, listPeople } from "@/lib/data/people";

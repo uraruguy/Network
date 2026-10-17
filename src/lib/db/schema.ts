@@ -1,3 +1,4 @@
+import { CIRCLES, HOBBIES, NOTE_KINDS, RECURRENCE, WARMTH, type Circle, type Hobby, type NoteKind, type Warmth } from "@/lib/constants";
 import { relations, sql } from "drizzle-orm";
 import {
   boolean,
@@ -20,20 +21,16 @@ import {
 /*  Enums                                                              */
 /* ------------------------------------------------------------------ */
 
-export const warmthEnum = pgEnum("warmth", ["inner", "active", "dormant", "archive"]);
-export const circleEnum = pgEnum("circle", ["nice_to_know", "hang_out_more", "potential_close"]);
-export const noteKindEnum = pgEnum("note_kind", ["note", "meeting", "call", "message"]);
+export const warmthEnum = pgEnum("warmth", WARMTH);
+export const circleEnum = pgEnum("circle", CIRCLES);
+export const noteKindEnum = pgEnum("note_kind", NOTE_KINDS);
 export const reminderStatusEnum = pgEnum("reminder_status", ["pending", "sent", "done", "snoozed"]);
-export const recurrenceEnum = pgEnum("recurrence", ["none", "monthly", "quarterly", "semiannual", "yearly", "custom_days"]);
+export const recurrenceEnum = pgEnum("recurrence", RECURRENCE);
 export const importStatusEnum = pgEnum("import_status", ["pending", "classified", "extracted", "approved", "skipped", "committed", "failed"]);
 export const inboxStatusEnum = pgEnum("inbox_status", ["new", "proposed", "applied", "dismissed"]);
 export const chatRoleEnum = pgEnum("chat_role", ["user", "assistant", "system", "tool"]);
 
-export const WARMTH = warmthEnum.enumValues;
-export const CIRCLES = circleEnum.enumValues;
-export const HOBBIES = ["football", "skiing", "hiking", "running", "padel", "partying", "coffee", "lunch", "gym", "other"] as const;
-export const NOTE_KINDS = noteKindEnum.enumValues;
-export const RECURRENCE = recurrenceEnum.enumValues;
+export { WARMTH, CIRCLES, HOBBIES, NOTE_KINDS, RECURRENCE };
 
 /* ------------------------------------------------------------------ */
 /*  Shared column helpers                                              */
@@ -426,7 +423,4 @@ export type Profile = typeof profiles.$inferSelect;
 export type City = typeof cities.$inferSelect;
 export type ImportItem = typeof importItems.$inferSelect;
 export type InboxItem = typeof inboxItems.$inferSelect;
-export type Warmth = (typeof WARMTH)[number];
-export type Circle = (typeof CIRCLES)[number];
-export type Hobby = (typeof HOBBIES)[number];
-export type NoteKind = (typeof NOTE_KINDS)[number];
+export type { Warmth, Circle, Hobby, NoteKind };

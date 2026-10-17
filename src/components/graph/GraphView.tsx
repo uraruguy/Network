@@ -11,7 +11,7 @@ import { CircleBadge } from "@/components/people/CirclePicker";
 import { ViewSwitch } from "@/components/globe/ViewSwitch";
 import { useGraph, useProfile } from "@/lib/queries/misc";
 import { useCategories } from "@/lib/queries/people";
-import { CIRCLES, type Circle } from "@/lib/db/schema";
+import { CIRCLES, type Circle } from "@/lib/constants";
 import { CIRCLE_META, cn, flag } from "@/lib/utils";
 
 const NetworkGraph = dynamic(() => import("./NetworkGraph").then((m) => m.NetworkGraph), { ssr: false });

@@ -1,5 +1,5 @@
 "use client";
-import { CIRCLES, type Circle } from "@/lib/db/schema";
+import { CIRCLES, type Circle } from "@/lib/constants";
 import { CIRCLE_META, cn } from "@/lib/utils";
 
 export function CirclePicker({ value, onChange }: { value: Circle | null; onChange: (c: Circle | null) => void }) {

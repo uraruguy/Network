@@ -1,7 +1,7 @@
 import { withOwner, parseBody } from "@/lib/api-server";
 import { createPerson, listPeople } from "@/lib/data/people";
 import { personInput } from "@/lib/schemas";
-import type { Warmth } from "@/lib/db/schema";
+import type { Warmth } from "@/lib/constants";
 
 export const GET = withOwner(async ({ ownerId, url }) => {
   const q = url.searchParams.get("q") ?? undefined;

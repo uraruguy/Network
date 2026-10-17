@@ -9,7 +9,7 @@ import { Avatar } from "@/components/glass/Avatar";
 import { Chip } from "@/components/glass/Chip";
 import { CategoryIcon } from "@/components/people/CategoryIcon";
 import { WarmthDot } from "@/components/people/WarmthPicker";
-import { WARMTH, type Warmth } from "@/lib/db/schema";
+import { WARMTH, type Warmth } from "@/lib/constants";
 import { ViewSwitch } from "./ViewSwitch";
 import { useGlobe, useProfile } from "@/lib/queries/misc";
 import { useCategories } from "@/lib/queries/people";

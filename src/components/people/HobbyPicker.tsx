@@ -2,7 +2,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import { Chip } from "@/components/glass/Chip";
 import { GlassInput } from "@/components/glass/GlassInput";
-import { HOBBIES, type Hobby } from "@/lib/db/schema";
+import { HOBBIES, type Hobby } from "@/lib/constants";
 import { HOBBY_META } from "@/lib/utils";
 
 type Props = { value: Hobby[]; other: string; onChange: (h: Hobby[]) => void; onOtherChange: (s: string) => void };

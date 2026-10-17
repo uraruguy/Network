@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CIRCLES, HOBBIES, NOTE_KINDS, RECURRENCE, WARMTH } from "@/lib/db/schema";
+import { CIRCLES, HOBBIES, NOTE_KINDS, RECURRENCE, WARMTH } from "@/lib/constants";
 
 const optStr = z.string().trim().max(2000).nullish().transform((v) => (v ? v : null));
 const optDate = z

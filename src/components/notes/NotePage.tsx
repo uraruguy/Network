@@ -5,7 +5,7 @@ import { ArrowLeft, Check, Pin, PinOff, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GlassButton } from "@/components/glass/GlassButton";
 import { GlassCard } from "@/components/glass/GlassCard";
-import { NOTE_KINDS, type NoteKind } from "@/lib/db/schema";
+import { NOTE_KINDS, type NoteKind } from "@/lib/constants";
 import { useDeleteNote, useNote, useUpdateNote } from "@/lib/queries/notes";
 import { usePerson } from "@/lib/queries/people";
 import { cn, formatDate } from "@/lib/utils";

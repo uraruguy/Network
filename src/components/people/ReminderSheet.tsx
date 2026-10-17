@@ -3,7 +3,7 @@ import { useState } from "react";
 import { GlassButton } from "@/components/glass/GlassButton";
 import { Field, GlassInput } from "@/components/glass/GlassInput";
 import { GlassSheet } from "@/components/glass/GlassSheet";
-import { RECURRENCE } from "@/lib/db/schema";
+import { RECURRENCE } from "@/lib/constants";
 import { useCreateReminder } from "@/lib/queries/reminders";
 import { cn } from "@/lib/utils";
 

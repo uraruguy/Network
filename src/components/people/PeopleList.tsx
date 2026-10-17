@@ -6,7 +6,7 @@ import { Chip } from "@/components/glass/Chip";
 import { GlassButton } from "@/components/glass/GlassButton";
 import { GlassCard } from "@/components/glass/GlassCard";
 import { PageHeader } from "@/components/shell/PageHeader";
-import { WARMTH, type Warmth } from "@/lib/db/schema";
+import { WARMTH, type Warmth } from "@/lib/constants";
 import { useCategories, usePeople } from "@/lib/queries/people";
 import { WARMTH_META } from "@/lib/utils";
 import { CategoryIcon } from "./CategoryIcon";

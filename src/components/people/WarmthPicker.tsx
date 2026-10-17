@@ -1,8 +1,8 @@
 "use client";
 import { motion } from "motion/react";
 import { useId } from "react";
-import { WARMTH } from "@/lib/db/schema";
-import type { Warmth } from "@/lib/db/schema";
+import { WARMTH } from "@/lib/constants";
+import type { Warmth } from "@/lib/constants";
 import { cn, WARMTH_META } from "@/lib/utils";
 
 export function WarmthPicker({ value, onChange }: { value: Warmth; onChange: (w: Warmth) => void }) {
