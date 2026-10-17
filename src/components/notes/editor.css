@@ -1,58 +1,232 @@
-/* Tiptap note editor — moved out of globals.css; imported by NoteEditor.tsx. */
-.tiptap {
+/* Note editor — Apple Notes on paper: one line per paragraph (no paragraph gaps), blank lines are
+   real empty paragraphs, Title / Heading / Subheading / Body, round checklists. Imported by
+   NoteEditor.tsx. Tokens only. */
+
+.tiptap.note-prose {
   outline: none;
-  min-height: 40vh;
+  min-height: 55dvh;
   font-size: 17px;
-  line-height: 1.6;
-  letter-spacing: -0.02em;
+  line-height: 1.47;
+  letter-spacing: -0.022em;
+  color: var(--fg);
+  caret-color: var(--accent);
+  overflow-wrap: anywhere;
+  -webkit-font-smoothing: antialiased;
+  /* Room so the last line can scroll above the keyboard toolbar. */
+  padding-bottom: 40dvh;
 }
-.tiptap p.is-editor-empty:first-child::before {
+.tiptap.note-prose:focus-visible {
+  outline: none;
+}
+
+.note-prose p {
+  margin: 0;
+  min-height: 1lh;
+}
+
+.note-prose h1,
+.note-prose h2,
+.note-prose h3 {
+  margin: 0.55em 0 0.1em;
+  color: var(--fg);
+}
+.note-prose > :first-child {
+  margin-top: 0;
+}
+.note-prose h1 {
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: 700;
+  letter-spacing: 0.006em;
+}
+.note-prose h2 {
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 700;
+  letter-spacing: -0.012em;
+}
+.note-prose h3 {
+  font-size: 17px;
+  line-height: 1.47;
+  font-weight: 600;
+  letter-spacing: -0.022em;
+}
+
+/* Placeholders: "Title" on an empty first line, "Note" while the body is one empty line. */
+.note-prose > .is-empty:first-child::before,
+.note-prose > p.is-empty:nth-child(2):last-child::before {
   content: attr(data-placeholder);
-  color: var(--fg-4);
   float: left;
-  pointer-events: none;
   height: 0;
+  pointer-events: none;
+  color: var(--fg-4);
 }
-.tiptap h1 { font-size: 28px; line-height: 34px; font-weight: 700; letter-spacing: 0.013em; margin: 0.6em 0 0.3em; }
-.tiptap h2 { font-size: 22px; line-height: 28px; font-weight: 600; letter-spacing: -0.012em; margin: 0.8em 0 0.3em; }
-.tiptap h3 { font-size: 20px; line-height: 25px; font-weight: 600; letter-spacing: -0.022em; margin: 0.8em 0 0.2em; }
-.tiptap p { margin: 0.35em 0; }
-.tiptap ul,
-.tiptap ol { padding-left: 1.4em; margin: 0.35em 0; }
-.tiptap ul { list-style: disc; }
-.tiptap ol { list-style: decimal; }
-.tiptap a { color: var(--accent-text); text-decoration: underline; text-underline-offset: 3px; }
-.tiptap blockquote { border-left: 3px solid var(--accent-300); padding-left: 1em; color: var(--fg-2); margin: 0.6em 0; }
-.tiptap code { font-family: var(--font-mono); font-size: 0.9em; background: var(--accent-soft); padding: 0.1em 0.35em; border-radius: 6px; }
-.tiptap hr { border: 0; border-top: 0.5px solid var(--separator); margin: 1.2em 0; }
-.tiptap ul[data-type="taskList"] { list-style: none; padding-left: 0.2em; }
-.tiptap ul[data-type="taskList"] li { display: flex; gap: 0.6em; align-items: flex-start; }
-.tiptap ul[data-type="taskList"] li > label { margin-top: 0.3em; }
-.tiptap ul[data-type="taskList"] li > label input {
+
+.note-prose strong {
+  font-weight: 650;
+}
+.note-prose a {
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in oklab, var(--accent-text) 45%, transparent);
+  cursor: text;
+}
+.note-prose a:hover {
+  text-decoration-color: currentColor;
+}
+
+.note-prose code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--fill-2);
+  padding: 0.08em 0.32em;
+  border-radius: var(--r-xs);
+}
+.note-prose pre {
+  margin: 0.4em 0;
+  padding: 12px 14px;
+  border-radius: var(--r-sm);
+  background: var(--fill-1);
+  border: 0.5px solid var(--hairline);
+  overflow-x: auto;
+  font-size: 15px;
+  line-height: 1.45;
+}
+.note-prose pre code {
+  background: none;
+  padding: 0;
+  font-size: inherit;
+}
+
+.note-prose blockquote {
+  margin: 0.2em 0;
+  padding-left: 14px;
+  border-left: 3px solid var(--fill-3);
+  color: var(--fg-2);
+}
+
+.note-prose hr {
+  border: 0;
+  border-top: 0.5px solid var(--separator);
+  margin: 0.9em 0;
+}
+
+/* Lists */
+.note-prose ul,
+.note-prose ol {
+  margin: 0;
+  padding-left: 1.55em;
+}
+.note-prose ul {
+  list-style: disc;
+}
+.note-prose ul ul {
+  list-style: circle;
+}
+.note-prose ol {
+  list-style: decimal;
+}
+.note-prose li {
+  padding-left: 0.15em;
+}
+.note-prose li::marker {
+  color: var(--fg-3);
+}
+.note-prose li > p {
+  min-height: 0;
+}
+
+/* Checklists — round Apple-style checkboxes */
+.note-prose ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0;
+}
+.note-prose ul[data-type="taskList"] ul[data-type="taskList"] {
+  padding-left: 1.7em;
+}
+.note-prose ul[data-type="taskList"] > li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55em;
+  padding-left: 0;
+}
+.note-prose ul[data-type="taskList"] > li > label {
+  flex: none;
+  display: grid;
+  place-items: center;
+  height: 1lh;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.note-prose ul[data-type="taskList"] > li > div {
+  flex: 1;
+  min-width: 0;
+}
+.note-prose ul[data-type="taskList"] > li > label input {
   appearance: none;
-  width: 20px;
-  height: 20px;
+  -webkit-appearance: none;
+  margin: 0;
+  width: 22px;
+  height: 22px;
   border-radius: 9999px;
   border: 1.5px solid var(--fg-4);
   display: grid;
   place-items: center;
   cursor: pointer;
-  transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+  position: relative;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
 }
-.tiptap ul[data-type="taskList"] li > label input:checked { background: var(--accent); border-color: var(--accent); }
-.tiptap ul[data-type="taskList"] li > label input:checked::after {
+/* 44px hit area around the 22px circle. */
+.note-prose ul[data-type="taskList"] > li > label input::before {
+  content: "";
+  position: absolute;
+  inset: -11px;
+}
+.note-prose ul[data-type="taskList"] > li > label input:active {
+  transform: scale(0.9);
+}
+.note-prose ul[data-type="taskList"] > li > label input:checked {
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+}
+.note-prose ul[data-type="taskList"] > li > label input:checked::after {
   content: "";
   width: 6px;
-  height: 10px;
+  height: 11px;
   border: solid var(--accent-fg);
   border-width: 0 2px 2px 0;
-  transform: translateY(-1px) rotate(45deg);
+  transform: translateY(-1.5px) rotate(45deg);
 }
-.tiptap ul[data-type="taskList"] li[data-checked="true"] > div { color: var(--fg-3); text-decoration: line-through; }
-.tiptap .mention {
+.note-prose ul[data-type="taskList"] > li > label input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.note-prose ul[data-type="taskList"] > li[data-checked="true"] > div {
+  color: var(--fg-3);
+}
+
+.note-prose ::selection {
+  background: color-mix(in oklab, var(--accent) 28%, transparent);
+}
+
+/* Desktop paper sizing */
+@media (min-width: 640px) {
+  .tiptap.note-prose {
+    min-height: 60dvh;
+    padding-bottom: 30dvh;
+  }
+}
+
+/* Mentions (future) */
+.note-prose .mention {
   color: var(--accent-text);
   background: var(--accent-soft);
-  border-radius: 8px;
+  border-radius: var(--r-xs);
   padding: 0.05em 0.4em;
   font-weight: 500;
 }

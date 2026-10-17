@@ -12,45 +12,19 @@
  * The decisions are pure (`planSave`, `planLeave`) and unit-tested.
  */
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import type { JSONContent } from "@tiptap/react";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { NoteKind } from "@/lib/constants";
 import { deleteNote, saveNote } from "@/lib/queries/notes";
 import { keys } from "@/lib/queries/keys";
 import type { NoteUpsert } from "@/lib/schemas";
 import { pendingNoteWrites, scheduleNotesSync, type NoteDoc } from "./cache";
+import { fingerprint, planLeave, planSave, type AutosaveState, type ContentSnapshot, type NoteContent } from "./autosave";
 import { isBlankContent } from "./title";
 
+export type { AutosaveState, ContentSnapshot, LeavePlan, NoteContent, SavePlan } from "./autosave";
+export { planLeave, planSave } from "./autosave";
+
 export const AUTOSAVE_DELAY = 600;
-
-export type NoteContent = { json: JSONContent; md: string; text: string; title: string | null };
-export type ContentSnapshot = { text: string; title: string | null; fingerprint: string };
-
-export type AutosaveState = {
-  /** The server has the note, or a create for it is queued. */
-  persisted: boolean;
-  /** Fingerprint of the content last handed to the queue (null: nothing yet). */
-  lastSaved: string | null;
-};
-
-export type SavePlan = { kind: "skip"; reason: "empty" | "unchanged" } | { kind: "save"; isNew: boolean };
-export type LeavePlan = "nothing" | "save" | "delete-empty" | "discard-draft";
-
-export const fingerprint = (json: JSONContent) => JSON.stringify(json);
-
-/** What to do with the editor's current content on a (debounced) save. */
-export function planSave(state: AutosaveState, c: ContentSnapshot): SavePlan {
-  if (isBlankContent({ title: c.title, contentText: c.text })) return { kind: "skip", reason: "empty" };
-  if (c.fingerprint === state.lastSaved) return { kind: "skip", reason: "unchanged" };
-  return { kind: "save", isNew: !state.persisted };
-}
-
-/** What to do when the user leaves the note. `c` is null when the editor never loaded. */
-export function planLeave(state: AutosaveState, c: ContentSnapshot | null): LeavePlan {
-  if (!c) return state.persisted ? "nothing" : "discard-draft";
-  if (isBlankContent({ title: c.title, contentText: c.text })) return state.persisted ? "delete-empty" : "discard-draft";
-  return c.fingerprint === state.lastSaved ? "nothing" : "save";
-}
 
 const snapshot = (c: NoteContent): ContentSnapshot => ({ text: c.text, title: c.title, fingerprint: fingerprint(c.json) });
 
@@ -220,12 +194,15 @@ export function useNoteAutosave({
     [noteId, qc, persisted],
   );
 
-  return {
-    changed,
-    ready,
-    flush: save,
-    saveMeta,
-    /** True once the server has (or will have) this note. */
-    isPersisted: persisted,
-  };
+  return useMemo(
+    () => ({
+      changed,
+      ready,
+      flush: save,
+      saveMeta,
+      /** True once the server has (or will have) this note. */
+      isPersisted: persisted,
+    }),
+    [changed, ready, save, saveMeta, persisted],
+  );
 }

@@ -3,7 +3,7 @@
  * strike), checklists, Apple Notes placeholders ("Title" / "Note"), gentle typography, Markdown
  * I/O, Apple Notes keyboard shortcuts and clean paste.
  *
- * Callbacks reach React through a ref (`hooks.current`) because extensions are created once.
+ * Callbacks reach React through a getter (`hooks()`) because extensions are created once.
  */
 import { Extension, type AnyExtension, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -22,7 +22,8 @@ export type NoteEditorHooks = {
   onImagesDropped?: (count: number) => void;
 };
 
-export type HooksRef = { current: NoteEditorHooks };
+/** Returns the latest callbacks (read lazily, so React can swap them without recreating the editor). */
+export type GetHooks = () => NoteEditorHooks;
 
 /** Paragraph-level styles in Apple Notes' vocabulary. */
 export type BlockStyle = "title" | "heading" | "subheading" | "body";
@@ -63,7 +64,7 @@ export function linkAt(editor: Editor): string | null {
   return (editor.getAttributes("link").href as string | undefined) ?? null;
 }
 
-const AppleNotesKeys = (hooks: HooksRef) =>
+const AppleNotesKeys = (hooks: GetHooks) =>
   Extension.create({
     name: "appleNotesKeys",
     // Before StarterKit's own bindings (⌘⇧B is Blockquote there; here it is Body, as in Notes).
@@ -77,20 +78,47 @@ const AppleNotesKeys = (hooks: HooksRef) =>
         "Mod-Shift-l": () => this.editor.chain().focus().toggleTaskList().run(),
         "Mod-Shift-u": () => toggleChecked(this.editor),
         "Mod-k": () => {
-          hooks.current.onLink?.();
+          hooks().onLink?.();
           return true;
         },
         Escape: () => {
           this.editor.commands.blur();
           return true;
         },
+        // Return at the end of the title steps into an empty body line instead of adding another.
+        Enter: () => {
+          const { state } = this.editor;
+          const { $from, empty } = state.selection;
+          if (!empty || $from.depth !== 1 || $from.index(0) !== 0 || $from.parentOffset !== $from.parent.content.size) return false;
+          const next = state.doc.maybeChild(1);
+          if (next?.type.name !== "paragraph" || next.content.size !== 0) return false;
+          return this.editor.commands.setTextSelection($from.after(1) + 1);
+        },
       };
+    },
+    addProseMirrorPlugins() {
+      return [
+        // Clearing the whole note brings back the empty Title line (and the "Note" line under it).
+        new Plugin({
+          key: new PluginKey("emptyNoteTitle"),
+          appendTransaction(transactions, _old, state) {
+            if (!transactions.some((t) => t.docChanged)) return null;
+            const { doc, schema } = state;
+            const first = doc.firstChild;
+            if (doc.childCount !== 1 || !first || first.type.name !== "paragraph" || first.content.size) return null;
+            const heading = schema.nodes.heading;
+            const paragraph = schema.nodes.paragraph;
+            if (!heading || !paragraph) return null;
+            return state.tr.setNodeMarkup(0, heading, { level: 1 }).insert(first.nodeSize, paragraph.create()).setMeta("addToHistory", false);
+          },
+        }),
+      ];
     },
   });
 
 const hasFiles = (dt: DataTransfer | null) => !!dt && Array.from(dt.types ?? []).includes("Files");
 
-const NotePaste = (hooks: HooksRef) =>
+const NotePaste = (hooks: GetHooks) =>
   Extension.create({
     name: "notePaste",
     addProseMirrorPlugins() {
@@ -101,7 +129,7 @@ const NotePaste = (hooks: HooksRef) =>
           props: {
             transformPastedHTML(html) {
               const r = cleanPastedHtml(html);
-              if (r.images) hooks.current.onImagesDropped?.(r.images);
+              if (r.images) hooks().onImagesDropped?.(r.images);
               return r.html;
             },
             handlePaste(_view, event) {
@@ -110,7 +138,7 @@ const NotePaste = (hooks: HooksRef) =>
               const html = dt.getData("text/html");
               const text = dt.getData("text/plain");
               if (!html && !text && hasFiles(dt)) {
-                hooks.current.onImagesDropped?.(dt.files.length || 1);
+                hooks().onImagesDropped?.(dt.files.length || 1);
                 return true;
               }
               if (text && looksLikeMarkdown(text) && (!html || htmlIsPlainish(html))) {
@@ -122,7 +150,7 @@ const NotePaste = (hooks: HooksRef) =>
             handleDrop(_view, event) {
               const dt = (event as DragEvent).dataTransfer;
               if (dt?.files?.length) {
-                hooks.current.onImagesDropped?.(dt.files.length);
+                hooks().onImagesDropped?.(dt.files.length);
                 return true;
               }
               return false;
@@ -143,7 +171,7 @@ const NotePaste = (hooks: HooksRef) =>
     },
   });
 
-export function noteExtensions(hooks: HooksRef): AnyExtension[] {
+export function noteExtensions(hooks: GetHooks): AnyExtension[] {
   return [
     StarterKit.configure({
       heading: { levels: [1, 2, 3] },
@@ -156,16 +184,17 @@ export function noteExtensions(hooks: HooksRef): AnyExtension[] {
         isAllowedUri: (url, ctx) => ctx.defaultValidate(url) && !/^\s*(javascript|data|vbscript|file):/i.test(url),
       },
       codeBlock: { HTMLAttributes: { spellcheck: "false" } },
+      // Apple Notes has no forced empty line at the end.
+      trailingNode: false,
     }),
     TaskList,
     TaskItem.configure({ nested: true }),
     Placeholder.configure({
       showOnlyCurrent: false,
       includeChildren: false,
-      placeholder: ({ editor, node, pos }) => {
-        if (pos === 0) return "Title";
-        return editor.state.doc.childCount <= 2 && node.type.name === "paragraph" ? "Note" : "";
-      },
+      // Which placeholder is visible is decided in CSS (first line; a lone empty body line),
+      // so it never goes stale as the document changes.
+      placeholder: ({ pos }) => (pos === 0 ? "Title" : "Note"),
     }),
     Typography.configure({
       copyright: false,

@@ -3,9 +3,9 @@
  */
 import type { JSONContent } from "@tiptap/react";
 
-/** A new note: one empty Title heading. */
+/** A new note: an empty Title line and an empty body line ("Title" / "Note" placeholders). */
 export function emptyNoteDoc(): JSONContent {
-  return { type: "doc", content: [{ type: "heading", attrs: { level: 1 } }] };
+  return { type: "doc", content: [{ type: "heading", attrs: { level: 1 } }, { type: "paragraph" }] };
 }
 
 const isEmptyParagraph = (n: JSONContent | undefined) => n?.type === "paragraph" && !n.content?.length;
