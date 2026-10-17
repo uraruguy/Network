@@ -21,7 +21,7 @@ export const searchPeopleOp = defineOp({
   name: "search_people",
   title: "Search people",
   description:
-    "Find people by free text (name, role, company, how you met — fuzzy and accent-insensitive) and/or filters. Filters combine with AND; values inside one filter with OR. Categories, tags and activities accept names (e.g. \"Mentor\", \"Hiking\") or ids. Use it for questions like \"who can I go hiking with in Ljubljana\" (activities + city) or \"investors I haven't talked to since June\" (categories + lastContactBefore). Returns up to `limit` compact rows, best match first (or most recently in touch without a query); pass `nextCursor` back as `cursor` for more.",
+    "Find people by free text (name, role, company, how you met — fuzzy and accent-insensitive) and/or filters. Filters combine with AND; values inside one filter with OR. Categories, tags and activities accept names (e.g. \"Mentor\", \"Hiking\") or ids. Use it for questions like \"who can I go hiking with in Lisbon\" (activities + city) or \"investors I haven't talked to since June\" (categories + lastContactBefore). Returns up to `limit` compact rows, best match first (or most recently in touch without a query); pass `nextCursor` back as `cursor` for more.",
   access: "read",
   input: z.object({
     query: z.string().max(200).optional().describe("Free text: name, role, company, context"),
@@ -30,7 +30,7 @@ export const searchPeopleOp = defineOp({
     activities: z.array(z.string().max(80)).max(20).optional().describe("Activity names or ids, e.g. [\"Hiking\", \"Football\"]"),
     warmth: z.array(z.enum(WARMTH)).max(4).optional().describe("inner = closest, active, dormant, archive"),
     circle: z.array(z.enum(CIRCLES)).max(3).optional(),
-    city: z.string().max(120).optional().describe("Home city name, e.g. \"Ljubljana\" (exact city; use people_by_place for a radius)"),
+    city: z.string().max(120).optional().describe("Home city name, e.g. \"Lisbon\" (exact city; use people_by_place for a radius)"),
     country: z.string().max(80).optional().describe("Country name or ISO code, e.g. \"Germany\" or \"DE\""),
     lastContactBefore: isoDate.optional().describe("Only people not in touch since this date"),
     limit: z.number().int().min(1).max(50).default(20),

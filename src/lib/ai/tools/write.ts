@@ -27,7 +27,7 @@ const shortText = (max: number) => z.string().max(max);
 /** Resolves a city name to a location via the cities dataset (most populous match). */
 async function cityLocation(city: string): Promise<LocationInput> {
   const [c] = await searchCities(city, 1);
-  if (!c) throw new ToolError("invalid_input", `Unknown city: ${city}.`, "Use the city's common English or local name, e.g. \"Ljubljana\".");
+  if (!c) throw new ToolError("invalid_input", `Unknown city: ${city}.`, "Use the city's common English or local name, e.g. \"Lisbon\".");
   return { cityId: c.id, name: c.name, admin: c.admin, country: c.country, countryCode: c.countryCode, lat: c.lat, lng: c.lng, timezone: c.timezone };
 }
 
