@@ -1,0 +1,200 @@
+/* ==================================================================== */
+/*  App shell — layout metrics, nav pills, collapsing nav bar             */
+/*  Imported by AppShell. Tokens come from app/globals.css.              */
+/* ==================================================================== */
+
+/* ---- Layout metrics (read by PageHeader, skeletons and pages) ------- */
+.app-shell {
+  --sidebar-w: 236px;
+  --page-px: 16px; /* content column side padding */
+  --page-pt: calc(12px + var(--sat)); /* space above the first element of a page */
+  --page-pb: calc(84px + var(--sab)); /* clears the floating tab bar */
+  --bar-pt: max(var(--sat), 6px); /* nav bar top inset once stuck */
+  --bar-h: 44px;
+  display: flex;
+  min-height: 100dvh;
+}
+@media (min-width: 640px) {
+  .app-shell {
+    --page-px: 24px;
+  }
+}
+@media (min-width: 1024px) {
+  .app-shell {
+    --page-px: 40px;
+    --page-pt: 32px;
+    --page-pb: 32px;
+    --bar-pt: 12px;
+  }
+}
+
+/* While the keyboard is up (touch) or on full-screen routes, nothing floats at the bottom. */
+:root[data-keyboard],
+:root:has(.app-shell[data-tabbar-hidden]) {
+  --chrome-bottom: 0px;
+}
+.app-shell[data-tabbar-hidden] {
+  --page-pb: calc(24px + var(--sab));
+}
+
+/* ---- Page frame (the view-transition snapshot) ---------------------- */
+.page {
+  min-height: 100dvh;
+}
+.page-column {
+  width: 100%;
+  max-width: 1100px;
+  margin-inline: auto;
+  padding: var(--page-pt) var(--page-px) var(--page-pb);
+}
+
+/* ---- Skip link ------------------------------------------------------- */
+.skip-link {
+  position: fixed;
+  left: 12px;
+  top: calc(var(--sat) + 8px);
+  z-index: var(--z-tooltip);
+  padding: 8px 14px;
+  border-radius: var(--r-full);
+  background: var(--accent-fill);
+  color: var(--accent-fg);
+  font-weight: 600;
+  transform: translateY(-200%);
+}
+.skip-link:focus-visible {
+  transform: none;
+}
+
+/* ---- Sidebar ---------------------------------------------------------- */
+.sidebar {
+  view-transition-name: sidebar;
+}
+/* Active pill: one element, moved with transforms (44px rows + 4px gap). */
+.nav-pill {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 44px;
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  transform: translateY(calc(var(--i, 0) * 48px));
+  transition:
+    transform var(--spring-smooth-dur) var(--spring-smooth),
+    opacity var(--dur-fast) var(--ease-out);
+}
+.nav-list:not([data-active]) .nav-pill {
+  opacity: 0;
+}
+
+/* ---- Tab bar ----------------------------------------------------------- */
+.tab-bar {
+  view-transition-name: tab-bar;
+  padding-bottom: max(10px, var(--sab));
+  transition:
+    transform var(--spring-sheet-dur) var(--spring-sheet),
+    opacity var(--dur-base) var(--ease-out);
+}
+.tab-bar[data-hidden],
+:root[data-keyboard] .tab-bar {
+  transform: translateY(calc(100% + 8px));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--dur-slow) var(--ease-ios),
+    opacity var(--dur-base) var(--ease-out);
+}
+.tab-pill {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  width: calc((100% - 8px) / var(--n, 5));
+  border-radius: var(--r-full);
+  background: var(--accent-soft);
+  transform: translateX(calc(var(--i, 0) * 100%));
+  transition:
+    transform var(--spring-smooth-dur) var(--spring-smooth),
+    opacity var(--dur-fast) var(--ease-out);
+}
+.tab-list:not([data-active]) .tab-pill {
+  opacity: 0;
+}
+
+/* ---- Sync capsule (phones) ------------------------------------------- */
+.sync-pill {
+  top: calc(var(--sat) + 6px);
+  opacity: 0;
+  transform: translateY(-12px) scale(0.96);
+  transition:
+    transform var(--spring-smooth-dur) var(--spring-smooth),
+    opacity var(--dur-base) var(--ease-out);
+}
+.sync-pill[data-visible] {
+  opacity: 1;
+  transform: none;
+}
+
+/* ---- Collapsing large-title nav bar (PageHeader) ---------------------- */
+.page-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  margin-top: calc(-1 * var(--page-pt));
+  margin-inline: calc(-1 * var(--page-px));
+  padding: var(--bar-pt) var(--page-px) 0;
+}
+.page-bar-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--bar-h);
+}
+/* Scroll-edge material: blurred canvas that fades out at its lower edge. Extends past the
+   content column to the viewport edges (the shell clips horizontal overflow). */
+.page-bar-bg {
+  position: absolute;
+  inset: 0 -100vw -14px;
+  background: color-mix(in oklab, var(--bg) 70%, transparent);
+  -webkit-backdrop-filter: var(--blur-glass);
+  backdrop-filter: var(--blur-glass);
+  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 22px), transparent);
+  mask-image: linear-gradient(to bottom, black calc(100% - 22px), transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-base) var(--ease-out);
+}
+.page-bar[data-scrolled] .page-bar-bg {
+  opacity: 1;
+}
+.page-bar-title {
+  max-width: 60%;
+  flex: none;
+  text-align: center;
+  opacity: 0;
+  transform: translateY(6px);
+  transition:
+    opacity var(--dur-base) var(--ease-out),
+    transform var(--spring-smooth-dur) var(--spring-smooth);
+}
+.page-bar[data-scrolled] .page-bar-title,
+.page-bar[data-inline] .page-bar-title {
+  opacity: 1;
+  transform: none;
+}
+/* Inline bars keep a little air before the content. */
+.page-bar[data-inline] {
+  margin-bottom: 8px;
+}
+.page-title-block {
+  padding-top: 2px;
+  padding-bottom: 16px;
+}
+.page-title-sentinel {
+  height: 0;
+}
+@media (prefers-reduced-transparency: reduce) {
+  .page-bar-bg {
+    background: var(--bg);
+  }
+}
