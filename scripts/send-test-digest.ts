@@ -1,4 +1,5 @@
 /** Sends the current digest preview to an address. Usage: pnpm tsx scripts/send-test-digest.ts you@example.com */
+import "./lib/server-only";
 import { config } from "dotenv";
 config({ path: [".env.local", ".env"] });
 

@@ -1,29 +1,30 @@
 import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from "ai";
-import { NextResponse } from "next/server";
 import { z } from "zod";
+import { jsonError } from "@/lib/api-server";
 import { aiConfigured, aiModel, toolsAreProviderExecuted } from "@/lib/ai/provider";
 import { networkTools } from "@/lib/ai/tools";
+import { getOwner } from "@/lib/auth/server";
 import { listCategories } from "@/lib/data/categories";
 import { ensureThread, saveMessages } from "@/lib/data/chat";
 import { getProfile } from "@/lib/data/profile";
-import { currentUser } from "@/lib/supabase/server";
 
 export const maxDuration = 120;
 
 const body = z.object({
-  id: z.string().optional(),
+  id: z.string().uuid().optional().catch(undefined),
   messages: z.array(z.custom<UIMessage>()),
   personId: z.string().uuid().nullish(),
 });
 
 export async function POST(req: Request) {
-  const user = await currentUser();
-  if (!user) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
-  if (!aiConfigured()) return NextResponse.json({ error: "AI is not configured (see .env.example)" }, { status: 400 });
-  const parsed = body.safeParse(await req.json());
-  if (!parsed.success) return NextResponse.json({ error: "Bad request" }, { status: 400 });
+  const owner = await getOwner();
+  if (!owner) return jsonError(401, "unauthenticated", "Not signed in");
+  if (!owner.mfaSatisfied) return jsonError(401, "mfa_required", "Passkey verification required");
+  if (!aiConfigured()) return jsonError(400, "ai_not_configured", "AI is not configured (see .env.example)");
+  const parsed = body.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) return jsonError(400, "bad_request", "Bad request");
   const { id, messages, personId } = parsed.data;
-  const ownerId = user.id;
+  const ownerId = owner.id;
 
   const [profile, cats, thread] = await Promise.all([getProfile(ownerId), listCategories(ownerId), ensureThread(ownerId, id, personId)]);
   const now = new Date();
