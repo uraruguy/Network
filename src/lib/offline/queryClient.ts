@@ -3,7 +3,8 @@ import { QueryClient } from "@tanstack/react-query";
 import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persister";
 import { del, get, set } from "idb-keyval";
 
-export const CACHE_VERSION = "v1";
+// Bump when cached API shapes change incompatibly (v2: people index, note excerpts, activities).
+export const CACHE_VERSION = "v2";
 
 export function makeQueryClient() {
   return new QueryClient({

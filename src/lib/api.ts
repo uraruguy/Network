@@ -24,6 +24,9 @@ function goToSignIn(code: string) {
   if (here.startsWith("/login")) return;
   redirecting = true;
   const step = code === "mfa_required" ? "/login/verify" : "/login";
+  // A full navigation on purpose: this runs outside React (no router here) and the sign-in pages
+  // must load fresh. The query cache lives in IndexedDB and survives it.
+  // eslint-disable-next-line @next/next/no-location-assign-relative-destination
   window.location.assign(`${step}?next=${encodeURIComponent(here)}`);
 }
 
