@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { SerwistProvider } from "@serwist/next/react";
 import "./globals.css";
 import { Providers } from "@/components/providers";
+import { headInlineScript } from "@/lib/security/inline-scripts";
 
 const APP_NAME = "The Network";
 
@@ -12,6 +13,8 @@ export const metadata: Metadata = {
   manifest: "/manifest.webmanifest",
   appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: APP_NAME },
   formatDetection: { telephone: false },
+  // Private app: keep every page out of search indexes (robots.txt + X-Robots-Tag say the same).
+  robots: { index: false, follow: false },
   icons: {
     icon: [{ url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
     apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
@@ -30,18 +33,15 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
-// Applies .dark + color-scheme before first paint; honours a saved override. ThemeSync takes over after hydration.
-const themeScript = `(function(){try{var t=localStorage.getItem('theme');var d=t==='dark'||(t!=='light'&&matchMedia('(prefers-color-scheme: dark)').matches);var r=document.documentElement;if(d)r.classList.add('dark');r.style.colorScheme=d?'dark':'light';if(t==='light'||t==='dark'){var c=d?'#070f10':'#f7fbfb';document.querySelectorAll('meta[name="theme-color"]').forEach(function(m){m.content=c})}}catch(e){}})();`;
-const devErrorHook =
-  process.env.NODE_ENV === "development"
-    ? `window.__errs=[];addEventListener('error',function(e){window.__errs.push(String(e.error&&e.error.stack||e.message).slice(0,2000))});addEventListener('unhandledrejection',function(e){window.__errs.push('REJ '+String(e.reason&&e.reason.stack||e.reason).slice(0,2000))});`
-    : "";
+// The pre-paint theme script lives in lib/security so the strict sign-in CSP can allow it by hash
+// (reading a per-request nonce here would make every page dynamic). See src/lib/security/csp.ts.
+const headScript = headInlineScript(process.env.NODE_ENV === "development");
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeScript + devErrorHook }} />
+        <script dangerouslySetInnerHTML={{ __html: headScript }} />
       </head>
       <body className="min-h-dvh antialiased">
         <SerwistProvider swUrl="/sw.js">

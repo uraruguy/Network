@@ -7,6 +7,8 @@ export default serwist({
   swSrc: "src/app/sw.ts",
   swDest: "public/sw.js",
   additionalPrecacheEntries: [{ url: "/~offline", revision }],
-  // API + auth must never be served from cache
+  // Keeps build output under api/ out of the precache manifest. This does NOT govern runtime
+  // requests: the NetworkOnly rules in src/app/sw.ts keep /api, /auth, /oauth, /r, /login and
+  // Supabase out of Cache Storage.
   globIgnores: ["**/api/**"],
 });

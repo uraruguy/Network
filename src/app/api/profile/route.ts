@@ -12,11 +12,19 @@ const patch = z.object({
   homeLocation: locationInput.nullish(),
 });
 
-export const GET = withOwner(async ({ ownerId }) => getProfile(ownerId));
+/** The profile as the client sees it: secrets (the Shortcut's inbox token) never leave the server. */
+async function publicProfile(ownerId: string) {
+  const profile = await getProfile(ownerId);
+  if (!profile) return null;
+  const { inboxToken: _secret, ...rest } = profile;
+  return rest;
+}
+
+export const GET = withOwner(async ({ ownerId }) => publicProfile(ownerId));
 export const PATCH = withOwner(async ({ ownerId, req }) => {
   const { homeLocation, ...rest } = await parseBody(req, patch);
   const values: Parameters<typeof updateProfile>[1] = { ...rest };
   if (homeLocation !== undefined) values.homeLocationId = homeLocation ? (await upsertLocation(ownerId, homeLocation)).id : null;
   await updateProfile(ownerId, values);
-  return getProfile(ownerId);
+  return publicProfile(ownerId);
 });
