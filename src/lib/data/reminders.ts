@@ -34,8 +34,15 @@ function getReminder(ownerId: string, id: string) {
   return db.query.reminders.findFirst({ where: and(eq(reminders.ownerId, ownerId), eq(reminders.id, id)), with: { person: personCols } });
 }
 
-/** Creates a reminder for one of the owner's people. Returns null if the person isn't theirs. */
+/**
+ * Creates a reminder for one of the owner's people. Returns null if the person isn't theirs.
+ * With a client-generated `id`, re-sending is idempotent (the existing reminder is returned).
+ */
 export async function createReminder(ownerId: string, input: ReminderData) {
+  if (input.id) {
+    const [existing] = await db.select({ ownerId: reminders.ownerId }).from(reminders).where(eq(reminders.id, input.id));
+    if (existing) return existing.ownerId === ownerId ? getReminder(ownerId, input.id) : null;
+  }
   const [person] = await db.select({ id: people.id }).from(people).where(and(eq(people.ownerId, ownerId), eq(people.id, input.personId), isNull(people.deletedAt)));
   if (!person) return null;
   let noteId: string | null = null;
@@ -46,6 +53,7 @@ export async function createReminder(ownerId: string, input: ReminderData) {
   const [row] = await db
     .insert(reminders)
     .values({
+      ...(input.id ? { id: input.id } : {}),
       ownerId,
       personId: input.personId,
       noteId,
@@ -120,6 +128,26 @@ export async function rescheduleReminder(ownerId: string, id: string, dueAt: Dat
     .where(and(eq(reminders.ownerId, ownerId), eq(reminders.id, id)))
     .returning({ id: reminders.id });
   return rows.length ? getReminder(ownerId, id) : null;
+}
+
+/** Edits a reminder in place (message, repeat, due time). A new `dueAt` re-opens it. */
+export async function updateReminder(
+  ownerId: string,
+  id: string,
+  patch: { dueAt?: Date; message?: string | null; recurrence?: schema.Reminder["recurrence"]; recurrenceDays?: number | null },
+) {
+  const values: Partial<typeof reminders.$inferInsert> = {};
+  if (patch.dueAt) Object.assign(values, { dueAt: patch.dueAt, status: "pending", sentAt: null, doneAt: null });
+  if (patch.message !== undefined) values.message = patch.message;
+  if (patch.recurrence !== undefined) {
+    values.recurrence = patch.recurrence;
+    values.recurrenceDays = patch.recurrence === "custom_days" ? (patch.recurrenceDays ?? 30) : null;
+  } else if (patch.recurrenceDays !== undefined) values.recurrenceDays = patch.recurrenceDays;
+  if (Object.keys(values).length) {
+    const rows = await db.update(reminders).set(values).where(and(eq(reminders.ownerId, ownerId), eq(reminders.id, id))).returning({ id: reminders.id });
+    if (!rows.length) return null;
+  }
+  return getReminder(ownerId, id);
 }
 
 export async function deleteReminder(ownerId: string, id: string): Promise<boolean> {

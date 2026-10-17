@@ -1,14 +1,16 @@
 "use client";
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useIsMutating, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
-import { api } from "@/lib/api";
+import { toast } from "@/components/ui/Toast";
+import { api, ApiError } from "@/lib/api";
 import type { PersonInput, PersonPatch } from "@/lib/schemas";
 import { fold } from "@/lib/text";
 import { matchesText, toLegacyDetail, toPersonListItem } from "./compat";
 import { keys } from "./keys";
+import { applyPersonPatch, indexRowFromDetail, seedPersonDetail, upsertIndexRow, type Lookups } from "./people-cache";
 import { registerReminderMutations } from "./reminders";
 import { registerTaxonomyMutations, useActivities } from "./taxonomy";
-import type { Category, NotesPage, PeopleSearchPage, PersonDetailApi, PersonIndexRow } from "./types";
+import type { ActivityRow, Category, NotesPage, PeopleSearchPage, PersonDetailApi, PersonIndexRow, TagRow } from "./types";
 
 export type PeopleFilters = { q?: string; category?: string; warmth?: string; country?: string };
 
@@ -72,6 +74,25 @@ export function usePersonDetail(id: string | null) {
   return useQuery({ queryKey: keys.person(id ?? ""), queryFn: () => api.get<PersonDetailApi>(`/api/people/${id}`), enabled: !!id });
 }
 
+/**
+ * The profile screen's read: the full detail, plus the cached index row as an instant preview
+ * (name, role, city, avatar) while the detail loads. A person created on this device whose create
+ * is still queued (offline) isn't fetched — the seeded detail is the truth until it syncs.
+ */
+export function usePersonProfile(id: string) {
+  const creating = useIsMutating({ mutationKey: MUT.createPerson, predicate: (m) => (m.state.variables as { id?: string } | undefined)?.id === id });
+  const detail = useQuery({
+    queryKey: keys.person(id),
+    queryFn: () => api.get<PersonDetailApi>(`/api/people/${id}`),
+    enabled: !!id && creating === 0,
+    retry: (count, e) => !(e instanceof ApiError && e.status === 404) && count < 1,
+  });
+  const { data: index } = usePeopleIndex();
+  const preview = useMemo(() => index?.find((p) => p.id === id), [index, id]);
+  const notFound = !detail.data && detail.error instanceof ApiError && detail.error.status === 404;
+  return { ...detail, person: detail.data, preview, notFound, creating: creating > 0 };
+}
+
 /** v1-compatible person detail (adds `hobbies`, note `contentText`). */
 export function usePerson(id: string | null) {
   const q = usePersonDetail(id);
@@ -96,6 +117,43 @@ export function usePersonNotes(personId: string | null, opts: { full?: boolean; 
   });
 }
 
+/* ---------- optimistic cache plumbing ---------- */
+
+/** Everything cached that optimistic person writes resolve relations from. */
+export function cachedLookups(qc: QueryClient): Lookups {
+  return {
+    categories: qc.getQueryData<Category[]>(keys.categories()),
+    activities: qc.getQueryData<ActivityRow[]>(keys.activities()),
+    tags: qc.getQueryData<TagRow[]>(keys.tags()),
+    people: qc.getQueryData<PersonIndexRow[]>(keys.peopleIndex()),
+  };
+}
+
+/** Writes a detail into the cache and mirrors it into the people index. */
+function putPerson(qc: QueryClient, detail: PersonDetailApi) {
+  qc.setQueryData(keys.person(detail.id), detail);
+  qc.setQueryData<PersonIndexRow[]>(keys.peopleIndex(), (rows) => (rows ? upsertIndexRow(rows, indexRowFromDetail(detail)) : rows));
+}
+
+function removeFromIndex(qc: QueryClient, id: string) {
+  qc.setQueryData<PersonIndexRow[]>(keys.peopleIndex(), (rows) => rows?.filter((r) => r.id !== id));
+}
+
+/** Server truth for everything a person write touches — skipped while other person writes are in flight. */
+function invalidatePeople(qc: QueryClient, id?: string) {
+  if (qc.isMutating({ mutationKey: ["people"] }) > 1) return;
+  qc.invalidateQueries({ queryKey: ["people"] });
+  if (id) qc.invalidateQueries({ queryKey: keys.person(id) });
+  qc.invalidateQueries({ queryKey: keys.globe() });
+  qc.invalidateQueries({ queryKey: keys.graph() });
+  qc.invalidateQueries({ queryKey: keys.stats() });
+  qc.invalidateQueries({ queryKey: keys.taxonomy() });
+  qc.invalidateQueries({ queryKey: keys.tags() });
+  qc.invalidateQueries({ queryKey: keys.activities() });
+}
+
+const errorText = (e: unknown) => (e instanceof Error ? e.message : undefined);
+
 /* ---------- mutations (defaults registered once so paused/offline mutations can resume after reload) ---------- */
 
 export const MUT = {
@@ -105,97 +163,120 @@ export const MUT = {
   restorePerson: ["people", "restore"] as const,
 };
 
-function invalidatePeople(qc: QueryClient) {
-  qc.invalidateQueries({ queryKey: ["people"] });
-  qc.invalidateQueries({ queryKey: keys.globe() });
-  qc.invalidateQueries({ queryKey: keys.graph() });
-  qc.invalidateQueries({ queryKey: keys.stats() });
-  qc.invalidateQueries({ queryKey: keys.taxonomy() });
-  qc.invalidateQueries({ queryKey: keys.tags() });
-  qc.invalidateQueries({ queryKey: keys.activities() });
-}
+export type CreatePersonVars = PersonInput & { id: string };
+export type UpdatePersonVars = { id: string; patch: PersonPatch };
 
 /**
  * Registers mutation defaults for people — and, until the providers call each registrar, also
- * for activities/tags and reminders (safe to call more than once).
+ * for activities/tags and reminders (safe to call more than once). Optimistic cache changes run in
+ * `onMutate`, so they happen once (a persisted mutation resuming after a reload skips it).
  */
 export function registerPeopleMutations(qc: QueryClient) {
-  qc.setMutationDefaults(MUT.createPerson, {
-    mutationFn: (input: PersonInput) => api.post<PersonDetailApi>("/api/people", input),
-    onSuccess: (data: PersonDetailApi) => {
-      qc.setQueryData(keys.person(data.id), data);
-      invalidatePeople(qc);
+  qc.setMutationDefaults<PersonDetailApi, Error, CreatePersonVars>(MUT.createPerson, {
+    mutationFn: (input: CreatePersonVars) => api.post<PersonDetailApi>("/api/people", input),
+    onMutate: async (input: CreatePersonVars) => {
+      if (!qc.getQueryData(keys.person(input.id))) putPerson(qc, seedPersonDetail(input, cachedLookups(qc)));
     },
-  });
-  qc.setMutationDefaults(MUT.updatePerson, {
-    mutationFn: ({ id, patch }: { id: string; patch: PersonPatch }) => api.patch<PersonDetailApi>(`/api/people/${id}`, patch),
-    onSuccess: (data: PersonDetailApi) => {
-      qc.setQueryData(keys.person(data.id), data);
-      invalidatePeople(qc);
+    onSuccess: (data: PersonDetailApi) => putPerson(qc, data),
+    onError: (e: unknown, input: CreatePersonVars) => {
+      removeFromIndex(qc, input.id);
+      qc.removeQueries({ queryKey: keys.person(input.id), exact: true });
+      toast.error(`Couldn’t add ${input.displayName}`, {
+        description: errorText(e),
+        duration: 10_000,
+        action: { label: "Retry", onClick: () => void runPerson(qc, MUT.createPerson, input, input.id).catch(() => {}) },
+      });
     },
+    onSettled: (_d: unknown, _e: unknown, input: CreatePersonVars) => invalidatePeople(qc, input.id),
   });
-  qc.setMutationDefaults(MUT.deletePerson, {
+  qc.setMutationDefaults<PersonDetailApi, Error, UpdatePersonVars>(MUT.updatePerson, {
+    mutationFn: ({ id, patch }: UpdatePersonVars) => api.patch<PersonDetailApi>(`/api/people/${id}`, patch),
+    onMutate: async ({ id, patch }: UpdatePersonVars) => {
+      await qc.cancelQueries({ queryKey: keys.person(id) });
+      const current = qc.getQueryData<PersonDetailApi>(keys.person(id));
+      if (current) putPerson(qc, applyPersonPatch(current, patch, cachedLookups(qc)));
+    },
+    onSuccess: (data: PersonDetailApi) => putPerson(qc, data),
+    onError: (e: unknown, { id }: UpdatePersonVars) => {
+      toast.error("Couldn’t save changes", { description: errorText(e) });
+      qc.invalidateQueries({ queryKey: keys.person(id) });
+      qc.invalidateQueries({ queryKey: keys.peopleIndex() });
+    },
+    onSettled: (_d: unknown, _e: unknown, { id }: UpdatePersonVars) => invalidatePeople(qc, id),
+  });
+  qc.setMutationDefaults<unknown, Error, string>(MUT.deletePerson, {
     mutationFn: (id: string) => api.delete(`/api/people/${id}`),
-    onSuccess: () => invalidatePeople(qc),
-  });
-  qc.setMutationDefaults(MUT.restorePerson, {
-    mutationFn: (id: string) => api.post<PersonDetailApi>(`/api/people/${id}/restore`),
-    onSuccess: (data: PersonDetailApi) => {
-      qc.setQueryData(keys.person(data.id), data);
-      invalidatePeople(qc);
+    onMutate: async (id: string) => removeFromIndex(qc, id),
+    onError: (e: unknown) => {
+      toast.error("Couldn’t remove this person", { description: errorText(e) });
+      qc.invalidateQueries({ queryKey: keys.peopleIndex() });
     },
+    onSettled: (_d: unknown, _e: unknown, id: string) => invalidatePeople(qc, id),
+  });
+  qc.setMutationDefaults<PersonDetailApi, Error, string>(MUT.restorePerson, {
+    mutationFn: (id: string) => api.post<PersonDetailApi>(`/api/people/${id}/restore`),
+    onMutate: async (id: string) => {
+      const cached = qc.getQueryData<PersonDetailApi>(keys.person(id));
+      if (cached) putPerson(qc, cached);
+    },
+    onSuccess: (data: PersonDetailApi) => putPerson(qc, data),
+    onError: (e: unknown) => toast.error("Couldn’t restore", { description: errorText(e) }),
+    onSettled: (_d: unknown, _e: unknown, id: string) => invalidatePeople(qc, id),
   });
   registerTaxonomyMutations(qc);
   registerReminderMutations(qc);
 }
+
+/** Runs a person mutation through its defaults, serialized with other writes to the same person. */
+function runPerson<TData, TVars>(qc: QueryClient, mutationKey: readonly unknown[], variables: TVars, personId: string): Promise<TData> {
+  const mutation = qc.getMutationCache().build<TData, Error, TVars, unknown>(qc, { mutationKey, scope: { id: `person:${personId}` } });
+  return mutation.execute(variables);
+}
+
+const ignore = () => {};
+
+/**
+ * Fire-and-forget person writes: the cache (detail + index) updates instantly, requests run in
+ * the background in per-person order (create → edits → delete), offline writes replay on reconnect.
+ */
+export function usePersonWrites() {
+  const qc = useQueryClient();
+  return useMemo(
+    () => ({
+      /** Creates a person and returns their (client-generated) id — navigate to it right away. */
+      create(input: PersonInput): string {
+        const id = input.id ?? crypto.randomUUID();
+        runPerson(qc, MUT.createPerson, { ...input, id }, id).catch(ignore);
+        return id;
+      },
+      update(id: string, patch: PersonPatch) {
+        runPerson(qc, MUT.updatePerson, { id, patch }, id).catch(ignore);
+      },
+      remove(id: string) {
+        runPerson(qc, MUT.deletePerson, id, id).catch(ignore);
+      },
+      restore(id: string): Promise<PersonDetailApi> {
+        return runPerson<PersonDetailApi, string>(qc, MUT.restorePerson, id, id);
+      },
+    }),
+    [qc],
+  );
+}
+
+/* ---------- v1-compatible hooks ---------- */
 
 /**
  * Creates a person. A client-generated id is attached at call time, so retries and offline replays
  * after a reload hit the same id (the server treats repeats as idempotent).
  */
 export function useCreatePerson() {
-  const m = useMutation<PersonDetailApi, Error, PersonInput>({ mutationKey: MUT.createPerson });
+  const m = useMutation<PersonDetailApi, Error, CreatePersonVars>({ mutationKey: MUT.createPerson });
   return { ...m, mutate: (input: PersonInput, opts?: Parameters<typeof m.mutate>[1]) => m.mutate({ ...input, id: input.id ?? crypto.randomUUID() }, opts) };
 }
 
 export function useUpdatePerson(id: string) {
-  const qc = useQueryClient();
-  return useMutation<PersonDetailApi, Error, PersonPatch, { previous?: PersonDetailApi }>({
-    mutationKey: MUT.updatePerson,
-    mutationFn: (patch) => api.patch<PersonDetailApi>(`/api/people/${id}`, patch),
-    onMutate: async (patch) => {
-      await qc.cancelQueries({ queryKey: keys.person(id) });
-      const previous = qc.getQueryData<PersonDetailApi>(keys.person(id));
-      if (previous) {
-        const {
-          homeLocation: _home,
-          metLocation: _met,
-          categoryIds,
-          activityIds,
-          tagNames: _tags,
-          hobbies: _hobbies,
-          hobbiesOther: _hobbiesOther,
-          nextFollowupAt,
-          ...cols
-        } = patch;
-        qc.setQueryData<PersonDetailApi>(keys.person(id), {
-          ...previous,
-          ...cols,
-          ...(categoryIds ? { categoryIds } : {}),
-          ...(activityIds ? { activityIds } : {}),
-          ...(nextFollowupAt !== undefined ? { nextFollowupAt: nextFollowupAt ? new Date(nextFollowupAt) : null } : {}),
-        } as PersonDetailApi);
-      }
-      return { previous };
-    },
-    onError: (_e, _v, ctx) => {
-      if (ctx?.previous) qc.setQueryData(keys.person(id), ctx.previous);
-    },
-    onSuccess: (data) => {
-      qc.setQueryData(keys.person(id), data);
-      invalidatePeople(qc);
-    },
-  });
+  const m = useMutation<PersonDetailApi, Error, UpdatePersonVars>({ mutationKey: MUT.updatePerson, scope: { id: `person:${id}` } });
+  return { ...m, mutate: (patch: PersonPatch, opts?: Parameters<typeof m.mutate>[1]) => m.mutate({ id, patch }, opts) };
 }
 
 export function useDeletePerson() {

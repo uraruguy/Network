@@ -7,6 +7,7 @@ import { NAV } from "./nav";
 import { OnlineIndicator } from "./OnlineIndicator";
 import { Logo } from "./Logo";
 import { Hydrated } from "./Hydrated";
+import { QuickAddPersonHost } from "@/components/people/QuickAddPersonSheet";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -65,6 +66,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Hydrated>{children}</Hydrated>
         </div>
       </main>
+
+      {/* App-wide quick add: ⌘N / N, ?new=1 */}
+      <QuickAddPersonHost />
 
       {/* Mobile tab bar */}
       <nav className="lg:hidden fixed inset-x-0 bottom-0 z-30 px-3 pb-[max(10px,var(--sab))]">
