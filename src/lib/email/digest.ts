@@ -11,9 +11,17 @@ const birthdayLine = (b: Birthday) => (b.turning ? `turns ${b.turning} ${when(b.
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
+/** "Dr. Ingo Kiedaisch" → "Ingo": the first word that isn't a title/initial. */
+const firstName = (name: string) => {
+  const words = name.trim().split(/\s+/);
+  return words.find((w) => !w.endsWith(".")) ?? words[0] ?? name;
+};
+
 export function digestSubject(due: ReminderWithPerson[], birthdays: Birthday[]) {
-  const names = due.slice(0, 3).map((r) => r.person.displayName.split(" ")[0]);
-  const more = due.length > 3 ? ` +${due.length - 3}` : "";
+  // One name per person, even with several reminders for them.
+  const people = [...new Map(due.map((r) => [r.person.id, firstName(r.person.displayName)])).values()];
+  const names = people.slice(0, 3);
+  const more = people.length > 3 ? ` +${people.length - 3}` : "";
   if (due.length) return `Follow up today: ${names.join(", ")}${more}`;
   if (birthdays.length) return `Birthday soon: ${birthdays[0]!.displayName}`;
   return "The Network — today";
