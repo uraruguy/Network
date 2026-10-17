@@ -16,7 +16,22 @@
     "dev:cloud": "dotenv run -f .env.cloud.local --override -q -- concurrently -p none \"serwist build --watch\" \"next dev -p 3100\"",
     "notes:import": "dotenv run -f .env.cloud.local --override -q -- tsx scripts/import-cli.ts .cache/notes-export.clean.json --label \"Apple Notes\"",
     "notes:clean": "python3 scripts/apple-notes/clean.py",
-    "notes:resume": "dotenv run -f .env.cloud.local --override -q -- tsx scripts/import-cli.ts --resume"
+    "notes:resume": "dotenv run -f .env.cloud.local --override -q -- tsx scripts/import-cli.ts --resume",
+    "import:backup": "tsx scripts/import/backup.ts",
+    "import:diff": "tsx scripts/import/diff.ts",
+    "import:ingest": "tsx scripts/import/ingest.ts",
+    "import:screen": "tsx scripts/import/run-stage.ts --stage screen",
+    "import:extract": "tsx scripts/import/run-stage.ts --stage extract",
+    "import:prepare": "tsx scripts/import/prepare.ts",
+    "import:validate": "tsx scripts/import/validate.ts",
+    "import:apply": "tsx scripts/import/apply.ts",
+    "import:reconcile": "tsx scripts/import/reconcile.ts",
+    "import:file": "tsx scripts/import/file-notes.ts",
+    "import:review": "tsx scripts/import/review.ts",
+    "import:commit": "tsx scripts/import/commit.ts",
+    "import:verify": "tsx scripts/import/verify.ts",
+    "import:spotcheck": "tsx scripts/import/spotcheck.ts",
+    "import:rollback": "tsx scripts/import/rollback.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.56",

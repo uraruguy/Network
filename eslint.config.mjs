@@ -21,6 +21,7 @@ const eslintConfig = defineConfig([
     "public/sw.js",
     "public/sw.js.map",
     ".cache/**",
+    ".claude/**",
   ]),
 ]);
 

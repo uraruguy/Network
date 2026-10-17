@@ -84,7 +84,7 @@ const getServerSnapshot = () => serverNow;
  * Current time (epoch ms), refreshed once a minute on the minute.
  * The argument is accepted for compatibility with the v1 `useNow(intervalMs)` and ignored.
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+ 
 export function useNow(_intervalMs?: number): number {
   return useSyncExternalStore(minuteClock.subscribe, minuteClock.getSnapshot, getServerSnapshot);
 }

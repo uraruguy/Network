@@ -1,14 +1,11 @@
 /**
  * Drizzle table objects for the import-resolution pipeline (migration 20261018000600).
- *
- * These are used with the query builder only (`db.select().from(importPeople)`), so they do not
- * need to be registered in the relational schema of `@/lib/db`. drizzle-kit reads only
- * `schema.ts`; at merge the new import_items / reminders columns should be mirrored there and the
- * duplicate table objects below (`importItemsX`, `remindersX`) replaced by the canonical ones.
+ * Used with the query builder only (`db.select().from(importPeople)`), so they are not registered
+ * in the relational schema of `@/lib/db`.
  */
 import { sql } from "drizzle-orm";
-import { bigint, boolean, doublePrecision, index, integer, jsonb, pgEnum, pgTable, primaryKey, real, text, timestamp, uniqueIndex, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
-import { importJobs, importStatusEnum, notes, people, recurrenceEnum, reminderStatusEnum } from "./schema";
+import { bigint, boolean, index, integer, jsonb, pgEnum, pgTable, real, text, timestamp, uniqueIndex, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { importItems, people } from "./schema";
 
 const ownerId = () =>
   uuid("owner_id")
@@ -23,41 +20,8 @@ export const IMPORT_PERSON_STATUS = ["proposed", "approved", "rejected", "merged
 export type ImportPersonStatus = (typeof IMPORT_PERSON_STATUS)[number];
 export const importPersonStatusEnum = pgEnum("import_person_status", IMPORT_PERSON_STATUS);
 
-/** import_items with the resolution columns (mirror of schema.importItems + 20261018000600). */
-export const importItemsX = pgTable(
-  "import_items",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    ownerId: ownerId(),
-    jobId: uuid("job_id")
-      .notNull()
-      .references(() => importJobs.id, { onDelete: "cascade" }),
-    externalId: text("external_id").notNull(),
-    externalUuid: text("external_uuid"),
-    title: text("title"),
-    html: text("html"),
-    text: text("text").notNull().default(""),
-    folder: text("folder"),
-    externalCreatedAt: timestamp("external_created_at", { withTimezone: true }),
-    externalModifiedAt: timestamp("external_modified_at", { withTimezone: true }),
-    contentHash: text("content_hash"),
-    classification: text("classification"),
-    classificationConfidence: doublePrecision("classification_confidence"),
-    candidates: jsonb("candidates"),
-    decision: jsonb("decision"),
-    status: importStatusEnum("status").notNull().default("pending"),
-    error: text("error"),
-    source: text("source").notNull().default("apple-notes"),
-    folders: text("folders").array().notNull().default(sql`'{}'::text[]`),
-    screenedWith: text("screened_with"),
-    extractionVersion: integer("extraction_version"),
-    goneAt: timestamp("gone_at", { withTimezone: true }),
-    noteId: uuid("note_id").references(() => notes.id, { onDelete: "set null" }),
-    dismissedReason: text("dismissed_reason"),
-    ...timestamps,
-  },
-  (t) => [index("import_items_owner_source_status_idx").on(t.ownerId, t.source, t.status), uniqueIndex("import_items_owner_external_uidx").on(t.ownerId, t.externalId)],
-);
+/** Canonical tables, re-exported under the names the import pipeline was written against. */
+export { importItems as importItemsX, reminders as remindersX, activities, personActivities } from "./schema";
 
 export const importPeople = pgTable(
   "import_people",
@@ -99,7 +63,7 @@ export const importMentions = pgTable(
     ownerId: ownerId(),
     itemId: uuid("item_id")
       .notNull()
-      .references(() => importItemsX.id, { onDelete: "cascade" }),
+      .references(() => importItems.id, { onDelete: "cascade" }),
     candidateIndex: integer("candidate_index"),
     surface: text("surface").notNull(),
     importPersonId: uuid("import_person_id").references(() => importPeople.id, { onDelete: "set null" }),
@@ -128,45 +92,7 @@ export const importCommitLog = pgTable("import_commit_log", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-/** reminders with provenance columns (mirror of schema.reminders + 20261018000600). */
-export const remindersX = pgTable("reminders", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  ownerId: ownerId(),
-  personId: uuid("person_id")
-    .notNull()
-    .references(() => people.id, { onDelete: "cascade" }),
-  dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
-  message: text("message"),
-  recurrence: recurrenceEnum("recurrence").notNull().default("none"),
-  recurrenceDays: integer("recurrence_days"),
-  status: reminderStatusEnum("status").notNull().default("pending"),
-  sentAt: timestamp("sent_at", { withTimezone: true }),
-  doneAt: timestamp("done_at", { withTimezone: true }),
-  sourceKind: text("source_kind"),
-  sourceRef: text("source_ref"),
-  ...timestamps,
-});
-
-/* Defined by migration 20261018000100; schema.ts mirror lands at merge. */
-export const activities = pgTable("activities", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  ownerId: ownerId(),
-  name: text("name").notNull(),
-  slug: text("slug").notNull(),
-});
-
-/* Defined by migration 20261018000100; schema.ts mirror lands at merge. */
-export const personActivities = pgTable(
-  "person_activities",
-  {
-    personId: uuid("person_id").notNull(),
-    activityId: uuid("activity_id").notNull(),
-    ownerId: ownerId(),
-  },
-  (t) => [primaryKey({ columns: [t.personId, t.activityId] })],
-);
-
 export type ImportPerson = typeof importPeople.$inferSelect;
 export type ImportMention = typeof importMentions.$inferSelect;
-export type ImportItemX = typeof importItemsX.$inferSelect;
+export type ImportItemX = typeof importItems.$inferSelect;
 export type CommitLogRow = typeof importCommitLog.$inferSelect;

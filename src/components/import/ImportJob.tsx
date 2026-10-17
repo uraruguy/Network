@@ -37,7 +37,7 @@ export function ImportJob({ jobId }: { jobId: string }) {
     (async () => {
       try {
         setPhase("classifying");
-        // eslint-disable-next-line no-constant-condition
+         
         while (!cancelled) {
           const r = await api.post<{ processed: number; remaining: number }>(`/api/import/${jobId}/classify`, {});
           if (r.processed === 0 || r.remaining === 0) break;

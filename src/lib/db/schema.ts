@@ -351,6 +351,9 @@ export const reminders = pgTable(
     status: reminderStatusEnum("status").notNull().default("pending"),
     sentAt: timestamp("sent_at", { withTimezone: true }),
     doneAt: timestamp("done_at", { withTimezone: true }),
+    /** Provenance for generated follow-ups (e.g. `apple-notes` + person key) so re-runs don't duplicate. */
+    sourceKind: text("source_kind"),
+    sourceRef: text("source_ref"),
     ...timestamps,
   },
   (t) => [index("reminders_owner_due_idx").on(t.ownerId, t.status, t.dueAt), index("reminders_person_idx").on(t.personId)],
@@ -403,10 +406,18 @@ export const importItems = pgTable(
     decision: jsonb("decision"),
     status: importStatusEnum("status").notNull().default("pending"),
     error: text("error"),
+    source: text("source").notNull().default("apple-notes"),
+    folders: text("folders").array().notNull().default(sql`'{}'::text[]`),
+    screenedWith: text("screened_with"),
+    extractionVersion: integer("extraction_version"),
+    goneAt: timestamp("gone_at", { withTimezone: true }),
+    noteId: uuid("note_id").references(() => notes.id, { onDelete: "set null" }),
+    dismissedReason: text("dismissed_reason"),
     ...timestamps,
   },
   (t) => [
     index("import_items_job_idx").on(t.jobId, t.status),
+    index("import_items_owner_source_status_idx").on(t.ownerId, t.source, t.status),
     uniqueIndex("import_items_owner_external_uidx").on(t.ownerId, t.externalId),
   ],
 );
