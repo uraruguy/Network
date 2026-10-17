@@ -1,18 +1,27 @@
-import { and, asc, eq, inArray, lte, sql } from "drizzle-orm";
+import "server-only";
+import { and, asc, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import type { ReminderData } from "@/lib/schemas";
+import { OPEN_REMINDER_STATUSES } from "./people";
 
-const { reminders, people } = schema;
+/*
+ * Follow-up reminders. `people.next_followup_at` is kept in sync by the `sync_next_followup`
+ * database trigger, so nothing here has to maintain it.
+ */
+
+const { reminders, people, notes } = schema;
 
 const personCols = { columns: { id: true, displayName: true, avatarUrl: true, headline: true, company: true } } as const;
 
+/** Open reminders (optionally due by `until` / for one person), soonest first. Skips deleted people. */
 export async function listReminders(ownerId: string, opts: { until?: Date; personId?: string } = {}) {
   return db.query.reminders.findMany({
     where: and(
       eq(reminders.ownerId, ownerId),
-      inArray(reminders.status, ["pending", "sent", "snoozed"]),
+      inArray(reminders.status, [...OPEN_REMINDER_STATUSES]),
       opts.until ? lte(reminders.dueAt, opts.until) : undefined,
       opts.personId ? eq(reminders.personId, opts.personId) : undefined,
+      sql`exists (select 1 from people p where p.id = ${reminders.personId} and p.deleted_at is null)`,
     ),
     orderBy: [asc(reminders.dueAt)],
     with: { person: personCols },
@@ -21,32 +30,55 @@ export async function listReminders(ownerId: string, opts: { until?: Date; perso
 
 export type ReminderWithPerson = Awaited<ReturnType<typeof listReminders>>[number];
 
-async function syncNextFollowup(ownerId: string, personId: string) {
-  const next = await db.query.reminders.findFirst({
-    where: and(eq(reminders.ownerId, ownerId), eq(reminders.personId, personId), inArray(reminders.status, ["pending", "sent", "snoozed"])),
-    orderBy: [asc(reminders.dueAt)],
-  });
-  await db.update(people).set({ nextFollowupAt: next?.dueAt ?? null }).where(eq(people.id, personId));
+function getReminder(ownerId: string, id: string) {
+  return db.query.reminders.findFirst({ where: and(eq(reminders.ownerId, ownerId), eq(reminders.id, id)), with: { person: personCols } });
 }
 
+/** Creates a reminder for one of the owner's people. Returns null if the person isn't theirs. */
 export async function createReminder(ownerId: string, input: ReminderData) {
+  const [person] = await db.select({ id: people.id }).from(people).where(and(eq(people.ownerId, ownerId), eq(people.id, input.personId), isNull(people.deletedAt)));
+  if (!person) return null;
+  let noteId: string | null = null;
+  if (input.noteId) {
+    const [note] = await db.select({ id: notes.id }).from(notes).where(and(eq(notes.ownerId, ownerId), eq(notes.id, input.noteId)));
+    noteId = note?.id ?? null;
+  }
   const [row] = await db
     .insert(reminders)
-    .values({ ownerId, personId: input.personId, dueAt: new Date(input.dueAt), message: input.message ?? null, recurrence: input.recurrence, recurrenceDays: input.recurrenceDays ?? null })
-    .returning();
-  await syncNextFollowup(ownerId, input.personId);
-  return db.query.reminders.findFirst({ where: eq(reminders.id, row!.id), with: { person: personCols } });
+    .values({
+      ownerId,
+      personId: input.personId,
+      noteId,
+      dueAt: new Date(input.dueAt),
+      message: input.message ?? null,
+      recurrence: input.recurrence,
+      recurrenceDays: input.recurrenceDays ?? null,
+    })
+    .returning({ id: reminders.id });
+  return getReminder(ownerId, row!.id);
 }
 
-function nextDue(from: Date, recurrence: schema.Reminder["recurrence"], days: number | null) {
+/** Next occurrence of a recurring reminder, or null when it doesn't recur. */
+export function nextDue(from: Date, recurrence: schema.Reminder["recurrence"], days: number | null) {
   const d = new Date(from);
   switch (recurrence) {
-    case "monthly": d.setMonth(d.getMonth() + 1); return d;
-    case "quarterly": d.setMonth(d.getMonth() + 3); return d;
-    case "semiannual": d.setMonth(d.getMonth() + 6); return d;
-    case "yearly": d.setFullYear(d.getFullYear() + 1); return d;
-    case "custom_days": d.setDate(d.getDate() + (days ?? 30)); return d;
-    default: return null;
+    case "monthly":
+      d.setMonth(d.getMonth() + 1);
+      return d;
+    case "quarterly":
+      d.setMonth(d.getMonth() + 3);
+      return d;
+    case "semiannual":
+      d.setMonth(d.getMonth() + 6);
+      return d;
+    case "yearly":
+      d.setFullYear(d.getFullYear() + 1);
+      return d;
+    case "custom_days":
+      d.setDate(d.getDate() + (days ?? 30));
+      return d;
+    default:
+      return null;
   }
 }
 
@@ -55,30 +87,42 @@ export async function completeReminder(ownerId: string, id: string) {
   const r = await db.query.reminders.findFirst({ where: and(eq(reminders.ownerId, ownerId), eq(reminders.id, id)) });
   if (!r) return null;
   const next = nextDue(new Date(), r.recurrence, r.recurrenceDays);
-  if (next) {
-    await db.update(reminders).set({ dueAt: next, status: "pending", sentAt: null, doneAt: null }).where(eq(reminders.id, id));
-  } else {
-    await db.update(reminders).set({ status: "done", doneAt: new Date() }).where(eq(reminders.id, id));
-  }
-  await db.update(people).set({ lastInteractionAt: sql`greatest(coalesce(${people.lastInteractionAt}, 'epoch'::timestamptz), now())` }).where(eq(people.id, r.personId));
-  await syncNextFollowup(ownerId, r.personId);
-  return db.query.reminders.findFirst({ where: eq(reminders.id, id), with: { person: personCols } });
+  const scope = and(eq(reminders.ownerId, ownerId), eq(reminders.id, id));
+  await db.transaction(async (tx) => {
+    if (next) await tx.update(reminders).set({ dueAt: next, status: "pending", sentAt: null, doneAt: null }).where(scope);
+    else await tx.update(reminders).set({ status: "done", doneAt: new Date() }).where(scope);
+    await tx
+      .update(people)
+      .set({ lastInteractionAt: sql`greatest(coalesce(${people.lastInteractionAt}, 'epoch'::timestamptz), now())` })
+      .where(and(eq(people.ownerId, ownerId), eq(people.id, r.personId)));
+  });
+  return getReminder(ownerId, id);
 }
 
+/** Pushes a reminder `days` ahead (09:00 server time). */
 export async function snoozeReminder(ownerId: string, id: string, days: number) {
-  const r = await db.query.reminders.findFirst({ where: and(eq(reminders.ownerId, ownerId), eq(reminders.id, id)) });
-  if (!r) return null;
   const due = new Date();
   due.setDate(due.getDate() + days);
   due.setHours(9, 0, 0, 0);
-  await db.update(reminders).set({ dueAt: due, status: "snoozed", sentAt: null }).where(eq(reminders.id, id));
-  await syncNextFollowup(ownerId, r.personId);
-  return db.query.reminders.findFirst({ where: eq(reminders.id, id), with: { person: personCols } });
+  const rows = await db
+    .update(reminders)
+    .set({ dueAt: due, status: "snoozed", sentAt: null })
+    .where(and(eq(reminders.ownerId, ownerId), eq(reminders.id, id)))
+    .returning({ id: reminders.id });
+  return rows.length ? getReminder(ownerId, id) : null;
 }
 
-export async function deleteReminder(ownerId: string, id: string) {
-  const r = await db.query.reminders.findFirst({ where: and(eq(reminders.ownerId, ownerId), eq(reminders.id, id)) });
-  if (!r) return;
-  await db.delete(reminders).where(eq(reminders.id, id));
-  await syncNextFollowup(ownerId, r.personId);
+/** Moves a reminder to an exact time and re-opens it. */
+export async function rescheduleReminder(ownerId: string, id: string, dueAt: Date) {
+  const rows = await db
+    .update(reminders)
+    .set({ dueAt, status: "pending", sentAt: null, doneAt: null })
+    .where(and(eq(reminders.ownerId, ownerId), eq(reminders.id, id)))
+    .returning({ id: reminders.id });
+  return rows.length ? getReminder(ownerId, id) : null;
+}
+
+export async function deleteReminder(ownerId: string, id: string): Promise<boolean> {
+  const rows = await db.delete(reminders).where(and(eq(reminders.ownerId, ownerId), eq(reminders.id, id))).returning({ id: reminders.id });
+  return rows.length > 0;
 }

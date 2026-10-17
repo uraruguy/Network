@@ -66,7 +66,8 @@ export async function proxy(request: NextRequest) {
   }
 
   if (kind === "mfa-step") {
-    if (!claims) return pathname.startsWith("/api/") ? deny("unauthenticated") : redirectTo("/login", here);
+    // No password session yet: sign in first, then continue to where the verify step was headed.
+    if (!claims) return pathname.startsWith("/api/") ? deny("unauthenticated") : redirectTo("/login", safeNext(request.nextUrl.searchParams.get("next"), request.nextUrl.origin));
     // Passkey already proven: skip the verify page.
     if (mfa && !pathname.startsWith("/api/")) return redirectTo(safeNext(request.nextUrl.searchParams.get("next"), request.nextUrl.origin));
     return finish(response);

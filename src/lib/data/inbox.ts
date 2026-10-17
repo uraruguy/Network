@@ -1,3 +1,4 @@
+import "server-only";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import { extractNote } from "@/lib/ai/import";

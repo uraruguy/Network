@@ -1,3 +1,4 @@
+import "server-only";
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import { clientEnv } from "@/lib/env";
@@ -6,6 +7,20 @@ import { emailConfigured, sendEmail } from "@/lib/email/send";
 import { listReminders } from "./reminders";
 
 const { profiles, reminders, people } = schema;
+
+/**
+ * Claims today's digest for a profile (atomic, so overlapping cron runs can't double-send).
+ * Returns the previous value to roll back with if sending fails, or false if already claimed.
+ */
+async function claimDigest(profileId: string, today: string): Promise<{ previous: string | null } | false> {
+  const [before] = await db.select({ previous: profiles.lastDigestOn }).from(profiles).where(eq(profiles.id, profileId));
+  const rows = await db
+    .update(profiles)
+    .set({ lastDigestOn: today })
+    .where(and(eq(profiles.id, profileId), sql`${profiles.lastDigestOn} is distinct from ${today}::date`))
+    .returning({ id: profiles.id });
+  return rows.length ? { previous: before?.previous ?? null } : false;
+}
 
 function localParts(now: Date, timeZone: string) {
   const fmt = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hour12: false });
@@ -28,8 +43,7 @@ export async function runDigest(opts: { force?: boolean; preview?: boolean; now?
     if (!opts.force && !opts.preview) {
       if (!p.digestEnabled) { results.push({ email: p.email, sent: false, reason: "disabled" }); continue; }
       if (hour < p.digestHour) { results.push({ email: p.email, sent: false, reason: `before ${p.digestHour}:00 local` }); continue; }
-      const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(reminders).where(and(eq(reminders.ownerId, p.id), sql`(${reminders.sentAt} at time zone ${p.timezone})::date = ${today}::date`));
-      if (n > 0) { results.push({ email: p.email, sent: false, reason: "already sent today" }); continue; }
+      if (p.lastDigestOn === today) { results.push({ email: p.email, sent: false, reason: "already sent today" }); continue; }
     }
 
     const endOfToday = new Date(`${today}T23:59:59`);
@@ -57,7 +71,14 @@ export async function runDigest(opts: { force?: boolean; preview?: boolean; now?
     if (!due.length && !overdue.length && !birthdays.length) { results.push({ email: p.email, sent: false, reason: "nothing due" }); continue; }
     if (!emailConfigured()) { results.push({ email: p.email, sent: false, reason: "RESEND_API_KEY missing", count: due.length + overdue.length }); continue; }
 
-    await sendEmail({ to: p.email, subject: digestSubject([...overdue, ...due], birthdays), html: digestHtml({ base, name: p.displayName ?? "Jakob", dateLabel, due, overdue, birthdays }) });
+    const claim = opts.force ? { previous: p.lastDigestOn } : await claimDigest(p.id, today);
+    if (!claim) { results.push({ email: p.email, sent: false, reason: "already sent today" }); continue; }
+    try {
+      await sendEmail({ to: p.email, subject: digestSubject([...overdue, ...due], birthdays), html: digestHtml({ base, name: p.displayName ?? "Jakob", dateLabel, due, overdue, birthdays }) });
+    } catch (err) {
+      if (!opts.force) await db.update(profiles).set({ lastDigestOn: claim.previous }).where(eq(profiles.id, p.id));
+      throw err;
+    }
     const ids = [...due, ...overdue].map((r) => r.id);
     if (ids.length) await db.update(reminders).set({ sentAt: now, status: sql`case when ${reminders.status} = 'pending' then 'sent'::reminder_status else ${reminders.status} end` }).where(and(inArray(reminders.id, ids), or(eq(reminders.status, "pending"), eq(reminders.status, "snoozed"), eq(reminders.status, "sent"))));
     results.push({ email: p.email, sent: true, count: ids.length });

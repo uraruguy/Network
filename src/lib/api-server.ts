@@ -2,6 +2,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { z, type ZodType } from "zod";
 import { getOwner, type Owner } from "@/lib/auth/server";
+import { HttpError } from "@/lib/errors";
 
 /**
  * Route-handler plumbing: authentication, parameter/body validation and one JSON error shape.
@@ -11,27 +12,7 @@ import { getOwner, type Owner } from "@/lib/auth/server";
  *          bad_request · rate_limited · internal
  */
 
-const DEFAULT_CODES: Record<number, string> = {
-  400: "bad_request",
-  401: "unauthenticated",
-  403: "forbidden",
-  404: "not_found",
-  409: "conflict",
-  410: "gone",
-  422: "invalid",
-  429: "rate_limited",
-  500: "internal",
-};
-
-export class HttpError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-    public code: string = DEFAULT_CODES[status] ?? "error",
-  ) {
-    super(message);
-  }
-}
+export { HttpError };
 
 /** Owner data is private and per-user: never cache it in shared caches or the browser's HTTP cache. */
 export const NO_STORE = "private, no-store";
