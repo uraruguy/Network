@@ -87,7 +87,8 @@ export async function listJobs(ownerId: string) {
 export async function getJob(ownerId: string, jobId: string) {
   const job = await db.query.importJobs.findFirst({ where: and(eq(importJobs.ownerId, ownerId), eq(importJobs.id, jobId)) });
   if (!job) return null;
-  const items = await db.query.importItems.findMany({ where: eq(importItems.jobId, jobId), orderBy: [desc(importItems.externalModifiedAt)] });
+  // Note bodies are fetched lazily per item (GET /api/import/items/[id]); the job poll stays small.
+  const items = await db.query.importItems.findMany({ where: eq(importItems.jobId, jobId), orderBy: [desc(importItems.externalModifiedAt)], columns: { html: false, text: false } });
   return { ...job, items };
 }
 

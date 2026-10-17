@@ -23,7 +23,7 @@ import { normalizeExtraction } from "@/lib/import/mentions";
 import { readProfile } from "@/lib/import/profile";
 import { openThreadsMarkdown, planReminders, type OpenThread, type PersonPlan } from "@/lib/import/reminders-policy";
 import { finalProposalResolver } from "./import-resolve";
-import { inTransaction, type DbOrTx, type Tx } from "./import-shared";
+import { ImportError, inTransaction, type DbOrTx, type Tx } from "./import-shared";
 
 const { people, notes, noteMentions, personCategories, categories, tags, personTags, locations } = schema;
 
@@ -654,7 +654,7 @@ export async function commitImport(db: DbOrTx, ownerId: string, opts: { source: 
 export type RollbackReport = { commits: string[]; reverted: Record<string, number>; refused: string[]; peopleRecomputed: number; dryRun: boolean };
 
 export async function rollbackImport(db: DbOrTx, ownerId: string, opts: { commitId?: string; source?: string; dryRun: boolean; force?: boolean }): Promise<RollbackReport> {
-  if (!opts.commitId && !opts.source) throw new Error("rollback needs a commit id or a source");
+  if (!opts.commitId && !opts.source) throw new ImportError(422, "rollback needs a commit id or a source");
   return inTransaction(db, !opts.dryRun, async (tx) => {
     const rows = await tx
       .select()
@@ -677,7 +677,7 @@ export async function rollbackImport(db: DbOrTx, ownerId: string, opts: { commit
       for (const r of foreignRem) if (!loggedReminders.has(r.id)) bad.set(r.personId, [...(bad.get(r.personId) ?? []), `reminder ${r.id}`]);
       if (bad.size && !opts.force) {
         report.refused = [...bad.entries()].map(([pid, what]) => `person ${pid}: ${what.join(", ")}`);
-        throw new Error(`Refusing to roll back: ${bad.size} imported people have notes/reminders not created by the import (pass --force to delete them too):\n  ${report.refused.slice(0, 20).join("\n  ")}`);
+        throw new ImportError(409, `Refusing to roll back: ${bad.size} imported people have notes/reminders not created by the import (pass --force to delete them too):\n  ${report.refused.slice(0, 20).join("\n  ")}`);
       }
     }
 

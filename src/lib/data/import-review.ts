@@ -131,7 +131,7 @@ export async function listProposals(db: DbOrTx, ownerId: string, source: string,
       )
       .limit(4);
     similar.set(r.p.id, [
-      ...people.map((p) => ({ kind: "person" as const, id: p.id, displayName: p.display_name, detail: p.detail })),
+      ...people.filter((p) => p.id !== r.p.committedPersonId).map((p) => ({ kind: "person" as const, id: p.id, displayName: p.display_name, detail: p.detail })),
       ...others.map((o) => ({ kind: "proposal" as const, id: o.id, displayName: o.displayName, detail: o.status })),
     ]);
   }
