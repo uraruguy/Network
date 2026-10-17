@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aiConfigFromEnv } from "./config";
+import { withChatOverrides } from "./config";
 import { buildSystem, contextBlock, MAX_INDEX_PEOPLE, peopleIndex, RULES, tailBlock } from "./prompt";
 
 const person = (i: number, over: Partial<{ name: string; city: string | null; categories: string[]; tags: string[] }> = {}) => ({
@@ -45,19 +45,15 @@ describe("prompt", () => {
   });
 });
 
-describe("aiConfigFromEnv", () => {
-  it("prefers Anthropic direct when its key is set", () => {
-    expect(aiConfigFromEnv({ ANTHROPIC_API_KEY: "a", OPENROUTER_API_KEY: "o" })).toMatchObject({ provider: "anthropic", apiKey: "a", mainModel: "claude-sonnet-5-5", fastModel: "claude-haiku-5-5", source: "env" });
+describe("withChatOverrides", () => {
+  const base = { provider: "openrouter" as const, apiKey: "o", mainModel: "anthropic/claude-sonnet-5.5", fastModel: "anthropic/claude-haiku-5.5", source: "env" as const };
+
+  it("keeps the connection's models without overrides", () => {
+    expect(withChatOverrides(base, {})).toEqual(base);
+    expect(withChatOverrides(base, { AI_CHAT_MODEL: "  " })).toEqual(base);
   });
 
-  it("falls back to OpenRouter, honours AI_PROVIDER and chat model overrides", () => {
-    expect(aiConfigFromEnv({ OPENROUTER_API_KEY: "o" })).toMatchObject({ provider: "openrouter", mainModel: "anthropic/claude-sonnet-5.5", fastModel: "anthropic/claude-haiku-5.5" });
-    expect(aiConfigFromEnv({ AI_PROVIDER: "openrouter", ANTHROPIC_API_KEY: "a", OPENROUTER_API_KEY: "o", AI_CHAT_MODEL: "x/y" })).toMatchObject({ provider: "openrouter", apiKey: "o", mainModel: "x/y" });
-    expect(aiConfigFromEnv({ AI_PROVIDER: "agent-sdk" })).toMatchObject({ provider: "agent-sdk", mainModel: "sonnet" });
-  });
-
-  it("is off without credentials", () => {
-    expect(aiConfigFromEnv({}).provider).toBe("off");
-    expect(aiConfigFromEnv({ AI_PROVIDER: "anthropic" }).provider).toBe("off");
+  it("applies chat-only overrides", () => {
+    expect(withChatOverrides(base, { AI_CHAT_MODEL: "x/y", AI_CHAT_MODEL_FAST: "x/z" })).toMatchObject({ provider: "openrouter", apiKey: "o", mainModel: "x/y", fastModel: "x/z" });
   });
 });

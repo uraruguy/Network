@@ -83,7 +83,7 @@ export async function POST(req: Request) {
   const { id: threadId, personId, model: modelChoice } = parsed.data;
   const ownerId = owner.id;
 
-  const config = await getAiConfig();
+  const config = await getAiConfig(ownerId);
   if (config.provider === "off") return jsonError(400, "ai_not_configured", "AI is not configured (see .env.example)");
 
   // Everything the prompt needs, in parallel: one round trip's worth of latency.
