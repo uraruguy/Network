@@ -1,0 +1,374 @@
+/* ==================================================================== */
+/*  App-native primitives — transition styles                            */
+/*                                                                       */
+/*  Base UI marks enter/exit with [data-starting-style]/[data-ending-    */
+/*  style]; CSS transitions (not keyframes) keep every popup             */
+/*  interruptible. Durations/easings come from the motion tokens in      */
+/*  globals.css; prefers-reduced-motion collapses them globally.         */
+/*  Imported once from globals.css.                                      */
+/* ==================================================================== */
+
+@layer components {
+  /* ---------- Backdrops ---------- */
+  .ui-backdrop {
+    position: fixed;
+    inset: 0;
+    min-height: 100dvh;
+    z-index: var(--z-overlay);
+    background: var(--backdrop);
+    opacity: calc(1 - var(--drawer-swipe-progress, 0));
+    transition: opacity var(--dur-slow) var(--ease-ios);
+  }
+  .ui-backdrop[data-starting-style],
+  .ui-backdrop[data-ending-style] {
+    opacity: 0;
+  }
+  .ui-backdrop[data-ending-style] {
+    transition-duration: calc(var(--drawer-swipe-strength, 1) * 300ms);
+  }
+  .ui-backdrop[data-swiping] {
+    transition-duration: 0ms;
+  }
+  /* iOS: a fixed backdrop can detach from the visual viewport during scroll-lock. */
+  @supports (-webkit-touch-callout: none) {
+    .ui-backdrop {
+      position: absolute;
+    }
+  }
+
+  /* ---------- Bottom sheet (phones) ---------- */
+  .ui-sheet-viewport {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-overlay);
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+  }
+  .ui-sheet {
+    --bleed: 48px;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-height: calc(100dvh - var(--sat) - 10px);
+    border-radius: var(--r-xl) var(--r-xl) 0 0;
+    border-bottom-width: 0;
+    outline: none;
+    transform-origin: 50% 0;
+    transform: translateY(calc(var(--drawer-snap-point-offset, 0px) + var(--drawer-swipe-movement-y, 0px)))
+      scale(calc(1 - var(--nested-drawers, 0) * 0.04));
+    transition: transform var(--spring-sheet-dur) var(--spring-sheet);
+    will-change: transform;
+  }
+  /* Bleed below the bottom edge so springs / rubber-banding never reveal a gap. */
+  .ui-sheet::after {
+    content: "";
+    pointer-events: none;
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    height: var(--bleed);
+    background-color: var(--surface-4);
+  }
+  .ui-sheet[data-starting-style],
+  .ui-sheet[data-ending-style] {
+    transform: translateY(calc(100% + 2px));
+  }
+  .ui-sheet[data-ending-style] {
+    transition-duration: calc(var(--drawer-swipe-strength, 1) * 380ms);
+    transition-timing-function: var(--ease-ios);
+  }
+  .ui-sheet[data-swiping] {
+    transition-duration: 0ms;
+    user-select: none;
+  }
+  .ui-sheet[data-size="large"] {
+    height: calc(100dvh - var(--sat) - 10px);
+  }
+  .ui-sheet[data-size="full"] {
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+    padding-top: var(--sat);
+  }
+  .ui-sheet[data-snap] {
+    height: calc(100dvh - var(--sat) - 10px);
+    padding-bottom: max(0px, calc(var(--drawer-snap-point-offset, 0px) + var(--drawer-swipe-movement-y, 0px)));
+  }
+  .ui-sheet[data-nested-drawer-open] > * {
+    opacity: 0.6;
+    transition: opacity var(--dur-base) var(--ease-out);
+  }
+
+  /* ---------- Centered dialog (≥ sm) ---------- */
+  .ui-dialog-viewport {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-overlay);
+    display: grid;
+    place-items: center;
+    padding: max(24px, var(--sat)) 16px max(24px, var(--sab));
+  }
+  .ui-dialog {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: min(100%, var(--dialog-width, 560px));
+    max-height: min(85dvh, 880px);
+    border-radius: var(--r-xl);
+    outline: none;
+    transition:
+      transform var(--spring-smooth-dur) var(--spring-smooth),
+      opacity var(--dur-base) var(--ease-out);
+  }
+  .ui-dialog[data-starting-style],
+  .ui-dialog[data-ending-style] {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  .ui-dialog[data-ending-style] {
+    transition-duration: var(--dur-base);
+    transition-timing-function: var(--ease-out);
+  }
+  .ui-dialog[data-nested-dialog-open] {
+    transform: scale(0.97);
+  }
+  /* Alert (confirm on desktop) pops a little more. */
+  .ui-alert[data-starting-style] {
+    transform: scale(1.06);
+  }
+  .ui-alert[data-ending-style] {
+    transform: scale(0.98);
+  }
+
+  /* ---------- Action sheet (phones) ---------- */
+  .ui-action-sheet {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    max-width: 480px;
+    padding: 0 8px calc(8px + var(--sab));
+    outline: none;
+    pointer-events: none;
+    transform: translateY(var(--drawer-swipe-movement-y, 0px));
+    transition: transform var(--spring-sheet-dur) var(--spring-sheet);
+  }
+  .ui-action-sheet > * {
+    pointer-events: auto;
+  }
+  .ui-action-sheet[data-starting-style],
+  .ui-action-sheet[data-ending-style] {
+    transform: translateY(calc(100% + 8px));
+  }
+  .ui-action-sheet[data-ending-style] {
+    transition-duration: calc(var(--drawer-swipe-strength, 1) * 320ms);
+    transition-timing-function: var(--ease-ios);
+  }
+  .ui-action-sheet[data-swiping] {
+    transition-duration: 0ms;
+  }
+
+  /* ---------- Anchored popups: popover, menu, select, combobox ---------- */
+  .ui-positioner {
+    z-index: var(--z-overlay);
+    outline: none;
+  }
+  .ui-popover {
+    transform-origin: var(--transform-origin);
+    outline: none;
+    transition:
+      transform var(--spring-snappy-dur) var(--spring-snappy),
+      opacity var(--dur-fast) var(--ease-out);
+  }
+  .ui-popover[data-starting-style],
+  .ui-popover[data-ending-style] {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  .ui-popover[data-ending-style] {
+    transition-duration: var(--dur-fast);
+    transition-timing-function: var(--ease-out);
+  }
+  .ui-popover[data-instant] {
+    transition: none;
+  }
+  /* Select keeps the popup aligned over the trigger: no scale, just fade. */
+  .ui-popover[data-side="none"][data-starting-style],
+  .ui-popover[data-side="none"][data-ending-style] {
+    transform: none;
+  }
+
+  .ui-tooltip {
+    transform-origin: var(--transform-origin);
+    transition:
+      transform var(--dur-fast) var(--ease-out),
+      opacity var(--dur-fast) var(--ease-out);
+  }
+  .ui-tooltip[data-starting-style],
+  .ui-tooltip[data-ending-style] {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  .ui-tooltip[data-instant] {
+    transition-duration: 0ms;
+  }
+
+  /* ---------- Toasts ---------- */
+  .ui-toast-viewport {
+    position: fixed;
+    z-index: var(--z-toast);
+    left: 0;
+    right: 0;
+    bottom: calc(var(--chrome-bottom) + 12px);
+    margin: 0 auto;
+    width: min(calc(100vw - 24px), 420px);
+  }
+  @media (min-width: 1024px) {
+    .ui-toast-viewport {
+      left: auto;
+      right: 24px;
+      bottom: 24px;
+      margin: 0;
+      width: 380px;
+    }
+  }
+  .ui-toast {
+    --gap: 10px;
+    --peek: 8px;
+    --scale: calc(max(0, 1 - (var(--toast-index) * 0.06)));
+    --shrink: calc(1 - var(--scale));
+    --height: var(--toast-frontmost-height, var(--toast-height));
+    --offset-y: calc(var(--toast-offset-y) * -1 + (var(--toast-index) * var(--gap) * -1) + var(--toast-swipe-movement-y));
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    z-index: calc(1000 - var(--toast-index));
+    height: var(--height);
+    transform-origin: 50% 100%;
+    transform: translateX(var(--toast-swipe-movement-x))
+      translateY(calc(var(--toast-swipe-movement-y) - (var(--toast-index) * var(--peek)) - (var(--shrink) * var(--height))))
+      scale(var(--scale));
+    transition:
+      transform var(--spring-smooth-dur) var(--spring-smooth),
+      opacity var(--dur-base) var(--ease-out),
+      height var(--dur-fast) var(--ease-out);
+    user-select: none;
+    cursor: default;
+  }
+  /* Hover bridge between stacked toasts so the stack doesn't collapse mid-gesture. */
+  .ui-toast::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 0;
+    width: 100%;
+    height: calc(var(--gap) + 1px);
+  }
+  .ui-toast[data-expanded] {
+    transform: translateX(var(--toast-swipe-movement-x)) translateY(var(--offset-y));
+    height: var(--toast-height);
+  }
+  .ui-toast[data-starting-style] {
+    opacity: 0;
+    transform: translateY(calc(100% + 16px)) scale(0.96);
+  }
+  .ui-toast[data-ending-style] {
+    opacity: 0;
+  }
+  .ui-toast[data-ending-style]:not([data-limited]):not([data-swipe-direction]) {
+    transform: translateY(calc(100% + 16px)) scale(0.96);
+  }
+  .ui-toast[data-ending-style][data-swipe-direction="down"] {
+    transform: translateY(calc(var(--toast-swipe-movement-y) + 150%));
+  }
+  .ui-toast[data-ending-style][data-swipe-direction="up"] {
+    transform: translateY(calc(var(--toast-swipe-movement-y) - 150%));
+  }
+  .ui-toast[data-ending-style][data-swipe-direction="left"] {
+    transform: translateX(calc(var(--toast-swipe-movement-x) - 120%)) translateY(var(--offset-y));
+  }
+  .ui-toast[data-ending-style][data-swipe-direction="right"] {
+    transform: translateX(calc(var(--toast-swipe-movement-x) + 120%)) translateY(var(--offset-y));
+  }
+  .ui-toast[data-limited] {
+    opacity: 0;
+  }
+  .ui-toast[data-swiping] {
+    transition-duration: 0ms;
+  }
+  .ui-toast-content {
+    transition: opacity var(--dur-base) var(--ease-out);
+  }
+  .ui-toast-content[data-behind] {
+    opacity: 0;
+  }
+  .ui-toast-content[data-expanded] {
+    opacity: 1;
+  }
+
+  /* ---------- Skeleton ---------- */
+  .ui-skeleton {
+    background-image: linear-gradient(90deg, var(--fill-2) 0%, var(--fill-1) 40%, var(--fill-2) 80%);
+    background-size: 220% 100%;
+    animation: ui-shimmer 1.6s var(--ease-in-out) infinite;
+  }
+  /* Delay + fade so a fast cache restore never flashes placeholders. */
+  .ui-skeleton-reveal {
+    animation: ui-fade-in var(--dur-base) var(--ease-out) 150ms both;
+  }
+
+  /* ---------- Calendar month change ---------- */
+  .ui-cal-month[data-dir="next"] {
+    animation: ui-cal-from-right var(--dur-base) var(--ease-out);
+  }
+  .ui-cal-month[data-dir="prev"] {
+    animation: ui-cal-from-left var(--dur-base) var(--ease-out);
+  }
+
+  /* ---------- Collapsible height (Base UI --collapsible-panel-height etc.) ---------- */
+  .ui-collapse {
+    overflow: hidden;
+    height: var(--collapsible-panel-height, auto);
+    transition: height var(--dur-base) var(--ease-out);
+  }
+  .ui-collapse[data-starting-style],
+  .ui-collapse[data-ending-style] {
+    height: 0;
+  }
+}
+
+@keyframes ui-shimmer {
+  from {
+    background-position: 130% 0;
+  }
+  to {
+    background-position: -30% 0;
+  }
+}
+
+@keyframes ui-cal-from-right {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+}
+@keyframes ui-cal-from-left {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+}
+
+@keyframes ui-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

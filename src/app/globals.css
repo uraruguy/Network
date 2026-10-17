@@ -1,103 +1,335 @@
 @import "tailwindcss" source(none);
+@import "../components/ui/ui.css";
 @source "../../src";
 
-/* ------------------------------------------------------------------ */
-/*  The Network — design tokens                                        */
-/*  Liquid Glass on WebKit: blur + saturate + translucency + specular  */
-/*  edge. Turquoise (blue↔green) accent on white; deep teal in dark.   */
-/* ------------------------------------------------------------------ */
+/* Tailwind `dark:` follows the `.dark` class (set by the theme script + ThemeSync), not the OS
+   media query — so it always agrees with the CSS tokens below. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ==================================================================== */
+/*  The Network — design tokens                                          */
+/*                                                                       */
+/*  Muted turquoise on a cool white canvas; deep slate-teal in dark.     */
+/*  All colours are OKLCH with deliberately low chroma. Token NAMES from */
+/*  v1 (--accent, --bg, --fg-2, --glass, --warm-*, …) keep working.      */
+/*                                                                       */
+/*  Layers:  raw tokens (:root / .dark)                                  */
+/*        →  @theme inline (Tailwind utilities: bg-surface-1, text-fg-2, */
+/*           rounded-lg, shadow-e2, ease-ios, text-headline …)           */
+/*        →  @utility (surface, glass, glass-thick, glass-map, specular, */
+/*           specular-ring, pressable …)                                 */
+/* ==================================================================== */
 
 :root {
   color-scheme: light;
 
-  /* Accent scale — turquoise */
-  --accent-50: #ecfeff;
-  --accent-100: #cffafe;
-  --accent-200: #a5f3fc;
-  --accent-300: #67e8f9;
-  --accent-400: #2ad4dd;
-  --accent-500: #0fb5ba;
-  --accent-600: #0a949a;
-  --accent-700: #0b767c;
-  --accent-800: #0e5d63;
-  --accent-900: #104d52;
+  /* ---- Accent: turquoise, hue ≈194 ---------------------------------- */
+  --accent-50: oklch(0.975 0.015 195);
+  --accent-100: oklch(0.95 0.03 195);
+  --accent-200: oklch(0.905 0.05 195);
+  --accent-300: oklch(0.83 0.075 194);
+  --accent-400: oklch(0.75 0.095 194);
+  --accent-500: oklch(0.67 0.1 194);
+  --accent-600: oklch(0.58 0.095 196);
+  --accent-700: oklch(0.5 0.08 198);
+  --accent-800: oklch(0.42 0.065 200);
+  --accent-900: oklch(0.34 0.05 202);
+  --accent-950: oklch(0.26 0.04 205);
 
-  --accent: var(--accent-500);
-  --accent-strong: var(--accent-600);
-  --accent-soft: var(--accent-100);
-  --accent-fg: #ffffff;
+  --accent: var(--accent-500); /* indicators: switches, dots, rings, selection */
+  --accent-fill: oklch(0.62 0.1 195); /* solid buttons — white label ≥3.4:1 */
+  --accent-strong: var(--accent-700); /* accent text + icons — ≥4.5:1 on white */
+  --accent-text: var(--accent-700);
+  --accent-soft: oklch(0.67 0.1 194 / 0.13); /* tinted backgrounds (works on any surface) */
+  --accent-fg: oklch(1 0 0); /* label on --accent-fill */
+  --focus-ring: oklch(0.67 0.1 194 / 0.55);
 
-  /* Neutral canvas */
-  --bg: #f4fbfb;
-  --bg-2: #eaf6f7;
-  --fg: #0b2426;
-  --fg-2: #3f5a5c;
-  --fg-3: #7a9295;
-  --fg-4: #a9bcbe;
+  /* ---- Neutrals: cool-tinted ----------------------------------------- */
+  --bg: oklch(0.985 0.004 200);
+  --bg-2: oklch(0.965 0.006 200);
+  --bg-3: oklch(0.94 0.008 205);
+  --fg: oklch(0.22 0.015 215);
+  --fg-2: oklch(0.42 0.015 215);
+  --fg-3: oklch(0.56 0.014 215); /* ≥4.4:1 on --bg */
+  --fg-4: oklch(0.74 0.01 215); /* placeholders, disabled, decoration */
 
-  /* Glass surfaces */
-  --glass: rgba(255, 255, 255, 0.62);
-  --glass-strong: rgba(255, 255, 255, 0.82);
-  --glass-tint: rgba(15, 181, 186, 0.06);
-  --glass-border: rgba(255, 255, 255, 0.85);
-  --glass-border-2: rgba(11, 36, 38, 0.08);
-  --glass-shadow: 0 1px 2px rgba(11, 36, 38, 0.04), 0 12px 40px -12px rgba(11, 36, 38, 0.18);
-  --glass-shadow-lg: 0 2px 4px rgba(11, 36, 38, 0.05), 0 24px 70px -20px rgba(11, 36, 38, 0.28);
-  --specular: linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.2) 40%, rgba(255, 255, 255, 0) 60%, rgba(255, 255, 255, 0.5));
+  /* ---- Elevation ------------------------------------------------------
+     e0  canvas (--bg)                     — page background
+     e1  surface-1 + shadow-e1             — cards, grouped lists, inputs (NO blur)
+     e2  surface-2 / glass + shadow-e2     — raised controls, floating chrome
+     e3  glass-thick + shadow-e3           — popovers, menus, toasts
+     e4  glass-thick + shadow-e4           — sheets, dialogs                 */
+  --surface-1: oklch(1 0 0 / 0.78);
+  --surface-2: oklch(1 0 0 / 0.94);
+  --surface-3: oklch(0.99 0.003 200 / 0.66); /* glass fill (blurred) */
+  --surface-4: oklch(0.99 0.003 200 / 0.82); /* glass-thick fill (blurred) */
+  --surface-solid: oklch(1 0 0);
+  --surface-map: oklch(0.99 0.003 200 / 0.9); /* glass-map while the map moves (no blur) */
 
-  /* Warmth */
-  --warm-inner: #ff6b6b;
+  --hairline: oklch(0.35 0.02 215 / 0.1);
+  --hairline-strong: oklch(0.35 0.02 215 / 0.18);
+  --separator: oklch(0.35 0.02 215 / 0.12);
+  --highlight: oklch(1 0 0 / 0.8); /* inset top edge of a lit surface */
+
+  /* iOS-style translucent fills for controls (segmented track, search field, chips) */
+  --fill-1: oklch(0.5 0.02 215 / 0.06);
+  --fill-2: oklch(0.5 0.02 215 / 0.1);
+  --fill-3: oklch(0.5 0.02 215 / 0.16);
+  --segment-thumb: oklch(1 0 0); /* selected segment / raised control knob */
+
+  --shadow-e1: 0 0.5px 1px oklch(0.3 0.03 220 / 0.05), 0 1px 3px oklch(0.3 0.03 220 / 0.05);
+  --shadow-e2: 0 1px 2px oklch(0.3 0.03 220 / 0.05), 0 6px 16px -6px oklch(0.3 0.03 220 / 0.12);
+  --shadow-e3: 0 2px 6px oklch(0.3 0.03 220 / 0.06), 0 14px 36px -10px oklch(0.3 0.03 220 / 0.18);
+  --shadow-e4: 0 4px 12px oklch(0.3 0.03 220 / 0.07), 0 28px 72px -18px oklch(0.3 0.03 220 / 0.26);
+  --backdrop: oklch(0.2 0.02 220 / 0.24);
+
+  --blur-glass: blur(20px) saturate(1.7);
+  --blur-thick: blur(30px) saturate(1.8);
+  --blur-map: blur(16px) saturate(1.6);
+
+  /* Specular: cheap inset light (all surfaces) + masked gradient ring (hero only) */
+  --specular-top: oklch(1 0 0 / 0.85);
+  --specular-edge: oklch(1 0 0 / 0.4);
+  --specular-bottom: oklch(1 0 0 / 0.25);
+  --specular: linear-gradient(
+    135deg,
+    oklch(1 0 0 / 0.9),
+    oklch(1 0 0 / 0.2) 40%,
+    oklch(1 0 0 / 0) 60%,
+    oklch(1 0 0 / 0.5)
+  );
+
+  /* ---- v1 compatibility aliases ------------------------------------- */
+  --glass: var(--surface-3);
+  --glass-strong: var(--surface-4);
+  --glass-tint: oklch(0.67 0.1 194 / 0.04);
+  --glass-border: var(--highlight);
+  --glass-border-2: var(--hairline);
+  --glass-shadow: var(--shadow-e2);
+  --glass-shadow-lg: var(--shadow-e4);
+
+  /* ---- Semantic -------------------------------------------------------- */
+  --danger: oklch(0.57 0.16 25);
+  --danger-soft: oklch(0.57 0.16 25 / 0.1);
+  --danger-fill: oklch(0.57 0.16 25); /* solid destructive button (white label) */
+  --success: oklch(0.56 0.11 165);
+  --success-soft: oklch(0.56 0.11 165 / 0.12);
+  --warning: oklch(0.72 0.13 70);
+  --warning-soft: oklch(0.72 0.13 70 / 0.14);
+
+  /* ---- Warmth + circles -------------------------------------------- */
+  --warm-inner: oklch(0.7 0.13 25); /* muted coral */
   --warm-active: var(--accent-500);
-  --warm-dormant: #f4b942;
-  --warm-archive: #9aa9ab;
+  --warm-dormant: oklch(0.8 0.11 80); /* soft amber */
+  --warm-archive: oklch(0.7 0.012 215); /* slate */
+  --circle-nice: var(--warm-archive);
+  --circle-more: var(--warm-dormant);
+  --circle-close: var(--warm-inner);
 
-  /* Semantic */
-  --danger: #e5484d;
-  --success: #12a594;
+  /* ---- Category palette: 10 muted hues (see src/lib/constants/palette.ts) */
+  --palette-teal: oklch(0.68 0.1 194);
+  --palette-sky: oklch(0.68 0.1 235);
+  --palette-indigo: oklch(0.64 0.1 270);
+  --palette-violet: oklch(0.66 0.1 305);
+  --palette-rose: oklch(0.68 0.1 350);
+  --palette-coral: oklch(0.69 0.11 28);
+  --palette-orange: oklch(0.72 0.1 58);
+  --palette-amber: oklch(0.78 0.1 85);
+  --palette-lime: oklch(0.74 0.1 128);
+  --palette-green: oklch(0.68 0.1 158);
 
-  /* Geometry */
+  /* Avatar fallback gradient lightness/chroma (hue comes from the name) */
+  --avatar-l1: 0.78;
+  --avatar-l2: 0.64;
+  --avatar-c: 0.085;
+
+  /* ---- Geometry --------------------------------------------------------
+     Concentric radii: an inner element's radius = outer radius − the padding
+     between them (e.g. a 22px card with 6px padding holds 16px rows).
+     xs 8 · sm 12 · md 16 · lg 22 · xl 28 — exposed as rounded-xs … rounded-xl. */
+  --r-xs: 8px;
   --r-sm: 12px;
-  --r-md: 18px;
-  --r-lg: 24px;
-  --r-xl: 32px;
+  --r-md: 16px;
+  --r-lg: 22px;
+  --r-xl: 28px;
+  --r-full: 9999px;
 
-  /* Safe areas (iOS) */
+  /* ---- Motion ----------------------------------------------------------- */
+  --dur-fast: 150ms;
+  --dur-base: 220ms;
+  --dur-slow: 350ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-ios: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-spring: var(--ease-ios); /* v1 alias */
+  /* CSS spring approximations generated from motion's spring() — same feel as src/lib/motion.ts.
+     Pair each easing with its duration: `transition: transform var(--spring-smooth-dur) var(--spring-smooth)` */
+  --spring-snappy-dur: 350ms;
+  --spring-snappy: linear(0, 0.1494, 0.4066, 0.6321, 0.7919, 0.8919, 0.949, 0.9789, 0.9932, 0.9992, 1.0012, 1);
+  --spring-smooth-dur: 450ms;
+  --spring-smooth: linear(0, 0.0873, 0.2644, 0.453, 0.6176, 0.7468, 0.8409, 0.9057, 0.9479, 0.974, 0.9891, 0.9973, 1.0012, 1.0027, 1);
+  --spring-sheet-dur: 650ms;
+  --spring-sheet: linear(0, 0.0521, 0.1679, 0.3056, 0.4418, 0.5643, 0.6684, 0.7531, 0.82, 0.8713, 0.9099, 0.9382, 0.9586, 0.973, 0.983, 0.9897, 0.9941, 0.997, 0.9987, 0.9997, 1.0003, 1);
+  --spring-pop-dur: 550ms;
+  --spring-pop: linear(0, 0.1207, 0.3611, 0.6035, 0.7953, 0.9239, 0.9971, 1.0301, 1.0384, 1.0339, 1.0247, 1.0154, 1.008, 1.003, 1.0001, 0.9989, 1, 1);
+
+  /* ---- Layering --------------------------------------------------------- */
+  --z-chrome: 30;
+  --z-overlay: 50;
+  --z-toast: 60;
+  --z-tooltip: 70;
+
+  /* ---- Safe areas (iOS) + app chrome ------------------------------------ */
   --sat: env(safe-area-inset-top, 0px);
   --sab: env(safe-area-inset-bottom, 0px);
   --sal: env(safe-area-inset-left, 0px);
   --sar: env(safe-area-inset-right, 0px);
+  /* Height of the phone tab bar incl. its safe-area padding; toasts float above it. */
+  --chrome-bottom: calc(64px + max(10px, var(--sab)));
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --chrome-bottom: 0px;
+  }
+}
+
+@supports not (transition-timing-function: linear(0, 1)) {
+  :root {
+    --spring-snappy: var(--ease-out);
+    --spring-smooth: var(--ease-ios);
+    --spring-sheet: var(--ease-ios);
+    --spring-pop: var(--ease-out);
+  }
 }
 
 .dark {
   color-scheme: dark;
 
   --accent: var(--accent-400);
+  --accent-fill: var(--accent-400);
   --accent-strong: var(--accent-300);
-  --accent-soft: rgba(42, 212, 221, 0.16);
-  --accent-fg: #042a2c;
+  --accent-text: var(--accent-300);
+  --accent-soft: oklch(0.75 0.095 194 / 0.16);
+  --accent-fg: oklch(0.2 0.03 210);
+  --focus-ring: oklch(0.75 0.095 194 / 0.6);
 
-  --bg: #061516;
-  --bg-2: #0a1f21;
-  --fg: #e8f6f6;
-  --fg-2: #b4cdcf;
-  --fg-3: #7a9698;
-  --fg-4: #4a6466;
+  --bg: oklch(0.16 0.012 215);
+  --bg-2: oklch(0.19 0.013 215);
+  --bg-3: oklch(0.23 0.014 215);
+  --fg: oklch(0.97 0.005 200);
+  --fg-2: oklch(0.82 0.012 205);
+  --fg-3: oklch(0.66 0.014 210);
+  --fg-4: oklch(0.48 0.014 212);
 
-  --glass: rgba(16, 40, 42, 0.55);
-  --glass-strong: rgba(16, 40, 42, 0.8);
-  --glass-tint: rgba(42, 212, 221, 0.05);
-  --glass-border: rgba(255, 255, 255, 0.12);
-  --glass-border-2: rgba(255, 255, 255, 0.06);
-  --glass-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 40px -12px rgba(0, 0, 0, 0.6);
-  --glass-shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.4), 0 24px 70px -20px rgba(0, 0, 0, 0.75);
-  --specular: linear-gradient(135deg, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0.04) 40%, rgba(255, 255, 255, 0) 60%, rgba(255, 255, 255, 0.12));
+  --surface-1: oklch(0.22 0.013 215 / 0.8);
+  --surface-2: oklch(0.26 0.014 215 / 0.92);
+  --surface-3: oklch(0.22 0.013 215 / 0.62);
+  --surface-4: oklch(0.25 0.014 215 / 0.8);
+  --surface-solid: oklch(0.21 0.013 215);
+  --surface-map: oklch(0.22 0.013 215 / 0.92);
 
-  --warm-archive: #6b7f81;
+  --hairline: oklch(1 0 0 / 0.08);
+  --hairline-strong: oklch(1 0 0 / 0.16);
+  --separator: oklch(1 0 0 / 0.09);
+  --highlight: oklch(1 0 0 / 0.07);
+
+  --fill-1: oklch(0.85 0.01 210 / 0.08);
+  --fill-2: oklch(0.85 0.01 210 / 0.13);
+  --fill-3: oklch(0.85 0.01 210 / 0.19);
+  --segment-thumb: oklch(0.4 0.014 215);
+
+  --shadow-e1: 0 0.5px 1px oklch(0 0 0 / 0.3), 0 1px 3px oklch(0 0 0 / 0.25);
+  --shadow-e2: 0 1px 2px oklch(0 0 0 / 0.35), 0 8px 20px -6px oklch(0 0 0 / 0.45);
+  --shadow-e3: 0 2px 8px oklch(0 0 0 / 0.4), 0 18px 44px -10px oklch(0 0 0 / 0.55);
+  --shadow-e4: 0 4px 14px oklch(0 0 0 / 0.45), 0 32px 80px -18px oklch(0 0 0 / 0.65);
+  --backdrop: oklch(0 0 0 / 0.5);
+
+  --specular-top: oklch(1 0 0 / 0.1);
+  --specular-edge: oklch(1 0 0 / 0.05);
+  --specular-bottom: oklch(1 0 0 / 0.03);
+  --specular: linear-gradient(
+    135deg,
+    oklch(1 0 0 / 0.25),
+    oklch(1 0 0 / 0.04) 40%,
+    oklch(1 0 0 / 0) 60%,
+    oklch(1 0 0 / 0.12)
+  );
+  --glass-tint: oklch(0.75 0.095 194 / 0.05);
+
+  --danger: oklch(0.7 0.15 22);
+  --danger-soft: oklch(0.7 0.15 22 / 0.16);
+  --danger-fill: oklch(0.6 0.16 24);
+  --success: oklch(0.74 0.12 165);
+  --success-soft: oklch(0.74 0.12 165 / 0.16);
+  --warning: oklch(0.8 0.12 75);
+  --warning-soft: oklch(0.8 0.12 75 / 0.16);
+
+  --warm-inner: oklch(0.72 0.13 25);
+  --warm-active: var(--accent-400);
+  --warm-dormant: oklch(0.8 0.11 80);
+  --warm-archive: oklch(0.55 0.012 215);
+
+  --palette-teal: oklch(0.74 0.1 194);
+  --palette-sky: oklch(0.74 0.1 235);
+  --palette-indigo: oklch(0.7 0.1 270);
+  --palette-violet: oklch(0.72 0.1 305);
+  --palette-rose: oklch(0.73 0.1 350);
+  --palette-coral: oklch(0.73 0.11 28);
+  --palette-orange: oklch(0.76 0.1 58);
+  --palette-amber: oklch(0.8 0.1 85);
+  --palette-lime: oklch(0.78 0.1 128);
+  --palette-green: oklch(0.73 0.1 158);
+
+  --avatar-l1: 0.66;
+  --avatar-l2: 0.52;
+  --avatar-c: 0.08;
+}
+
+/* Accessibility: system "Reduce transparency" → opaque surfaces, no blur. */
+@media (prefers-reduced-transparency: reduce) {
+  :root,
+  .dark {
+    --surface-1: var(--surface-solid);
+    --surface-2: var(--surface-solid);
+    --surface-3: var(--surface-solid);
+    --surface-4: var(--surface-solid);
+    --surface-map: var(--surface-solid);
+    --blur-glass: none;
+    --blur-thick: none;
+    --blur-map: none;
+  }
+}
+
+/* Accessibility: "Increase contrast" → stronger hairlines and secondary text. */
+@media (prefers-contrast: more) {
+  :root {
+    --hairline: oklch(0.35 0.02 215 / 0.28);
+    --hairline-strong: oklch(0.35 0.02 215 / 0.4);
+    --separator: oklch(0.35 0.02 215 / 0.3);
+    --fg-2: oklch(0.32 0.015 215);
+    --fg-3: oklch(0.44 0.014 215);
+    --fg-4: oklch(0.6 0.01 215);
+    --fill-2: oklch(0.5 0.02 215 / 0.16);
+  }
+  .dark {
+    --hairline: oklch(1 0 0 / 0.24);
+    --hairline-strong: oklch(1 0 0 / 0.36);
+    --separator: oklch(1 0 0 / 0.24);
+    --fg-2: oklch(0.9 0.01 205);
+    --fg-3: oklch(0.78 0.012 210);
+    --fg-4: oklch(0.62 0.014 212);
+    --fill-2: oklch(0.85 0.01 210 / 0.2);
+  }
 }
 
 @theme inline {
+  /* Colours */
   --color-accent: var(--accent);
+  --color-accent-fill: var(--accent-fill);
   --color-accent-strong: var(--accent-strong);
+  --color-accent-text: var(--accent-text);
   --color-accent-soft: var(--accent-soft);
   --color-accent-fg: var(--accent-fg);
   --color-accent-50: var(--accent-50);
@@ -110,62 +342,155 @@
   --color-accent-700: var(--accent-700);
   --color-accent-800: var(--accent-800);
   --color-accent-900: var(--accent-900);
+  --color-accent-950: var(--accent-950);
 
   --color-bg: var(--bg);
   --color-bg-2: var(--bg-2);
+  --color-bg-3: var(--bg-3);
   --color-fg: var(--fg);
   --color-fg-2: var(--fg-2);
   --color-fg-3: var(--fg-3);
   --color-fg-4: var(--fg-4);
+
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-surface-4: var(--surface-4);
+  --color-surface-solid: var(--surface-solid);
+  --color-fill-1: var(--fill-1);
+  --color-fill-2: var(--fill-2);
+  --color-fill-3: var(--fill-3);
+  --color-segment-thumb: var(--segment-thumb);
+  --color-hairline: var(--hairline);
+  --color-hairline-strong: var(--hairline-strong);
+  --color-separator: var(--separator);
+
   --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-fill: var(--danger-fill);
   --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
 
   --color-warm-inner: var(--warm-inner);
   --color-warm-active: var(--warm-active);
   --color-warm-dormant: var(--warm-dormant);
   --color-warm-archive: var(--warm-archive);
 
+  --color-palette-teal: var(--palette-teal);
+  --color-palette-sky: var(--palette-sky);
+  --color-palette-indigo: var(--palette-indigo);
+  --color-palette-violet: var(--palette-violet);
+  --color-palette-rose: var(--palette-rose);
+  --color-palette-coral: var(--palette-coral);
+  --color-palette-orange: var(--palette-orange);
+  --color-palette-amber: var(--palette-amber);
+  --color-palette-lime: var(--palette-lime);
+  --color-palette-green: var(--palette-green);
+
+  /* Radii — rounded-xs … rounded-xl */
+  --radius-xs: var(--r-xs);
   --radius-sm: var(--r-sm);
   --radius-md: var(--r-md);
   --radius-lg: var(--r-lg);
   --radius-xl: var(--r-xl);
 
+  /* Elevation — shadow-e1 … shadow-e4. (Tailwind re-emits these names into its theme layer
+     as `var(--shadow-eN)`; the unlayered :root/.dark values above win the cascade.) */
+  --shadow-e1: var(--shadow-e1);
+  --shadow-e2: var(--shadow-e2);
+  --shadow-e3: var(--shadow-e3);
+  --shadow-e4: var(--shadow-e4);
+
+  /* Easing — ease-out, ease-ios, ease-spring */
+  --ease-out: var(--ease-out);
+  --ease-in: var(--ease-in);
+  --ease-in-out: var(--ease-in-out);
+  --ease-ios: var(--ease-ios);
+  --ease-spring: var(--ease-ios);
+
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Inter, system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
-
-  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* ---------- base ---------- */
-
-html {
-  -webkit-text-size-adjust: 100%;
-  -webkit-tap-highlight-color: transparent;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
+/* Apple HIG type scale (iOS, default Dynamic Type size). Tracking follows SF Pro's table:
+   slightly negative for 13–22px text, ~0 for captions, slightly positive for the Display sizes.
+   Usage: text-large-title, text-title1 … text-caption2 (sets size, leading, tracking, weight). */
+@theme {
+  --text-large-title: 34px;
+  --text-large-title--line-height: 41px;
+  --text-large-title--letter-spacing: 0.011em;
+  --text-large-title--font-weight: 700;
+  --text-title1: 28px;
+  --text-title1--line-height: 34px;
+  --text-title1--letter-spacing: 0.013em;
+  --text-title1--font-weight: 700;
+  --text-title2: 22px;
+  --text-title2--line-height: 28px;
+  --text-title2--letter-spacing: -0.012em;
+  --text-title2--font-weight: 600;
+  --text-title3: 20px;
+  --text-title3--line-height: 25px;
+  --text-title3--letter-spacing: -0.022em;
+  --text-title3--font-weight: 600;
+  --text-headline: 17px;
+  --text-headline--line-height: 22px;
+  --text-headline--letter-spacing: -0.025em;
+  --text-headline--font-weight: 600;
+  --text-body: 17px;
+  --text-body--line-height: 22px;
+  --text-body--letter-spacing: -0.025em;
+  --text-callout: 16px;
+  --text-callout--line-height: 21px;
+  --text-callout--letter-spacing: -0.019em;
+  --text-subhead: 15px;
+  --text-subhead--line-height: 20px;
+  --text-subhead--letter-spacing: -0.015em;
+  --text-footnote: 13px;
+  --text-footnote--line-height: 18px;
+  --text-footnote--letter-spacing: -0.006em;
+  --text-caption: 12px;
+  --text-caption--line-height: 16px;
+  --text-caption--letter-spacing: 0em;
+  --text-caption2: 11px;
+  --text-caption2--line-height: 13px;
+  --text-caption2--letter-spacing: 0.005em;
 }
 
-html,
-body {
-  height: 100%;
-  overscroll-behavior-y: none;
+/* ---------- base ----------
+   In @layer base so utilities (outline-none, text-*, …) can override it. */
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  html,
+  body {
+    height: 100%;
+    overscroll-behavior-y: none;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: 17px;
+    line-height: 22px;
+  }
 }
 
-body {
-  background: var(--bg);
-  color: var(--fg);
-  font-family: var(--font-sans);
-  font-feature-settings: "cv11", "ss01";
-  letter-spacing: -0.011em;
-}
-
-/* Ambient background: soft turquoise auras that glass surfaces blur over */
+/* Ambient background: a faint turquoise wash that glass surfaces pick up. */
 .app-bg {
   position: fixed;
   inset: 0;
   z-index: -1;
   overflow: hidden;
+  pointer-events: none;
   background: var(--bg);
 }
 .app-bg::before,
@@ -173,91 +498,164 @@ body {
   content: "";
   position: absolute;
   border-radius: 9999px;
-  filter: blur(80px);
-  opacity: 0.55;
 }
 .app-bg::before {
-  width: 60vmax;
-  height: 60vmax;
-  left: -20vmax;
-  top: -25vmax;
+  width: 80vmax;
+  height: 80vmax;
+  left: -28vmax;
+  top: -36vmax;
   background: radial-gradient(closest-side, var(--accent-200), transparent);
+  opacity: 0.35;
 }
 .app-bg::after {
-  width: 55vmax;
-  height: 55vmax;
-  right: -20vmax;
-  bottom: -25vmax;
-  background: radial-gradient(closest-side, #bfe9ff, transparent);
+  width: 60vmax;
+  height: 60vmax;
+  right: -24vmax;
+  bottom: -30vmax;
+  background: radial-gradient(closest-side, var(--accent-100), transparent);
+  opacity: 0.3;
 }
 .dark .app-bg::before {
-  background: radial-gradient(closest-side, rgba(15, 181, 186, 0.35), transparent);
-  opacity: 0.7;
+  background: radial-gradient(closest-side, var(--accent-700), transparent);
+  opacity: 0.22;
 }
 .dark .app-bg::after {
-  background: radial-gradient(closest-side, rgba(38, 99, 235, 0.25), transparent);
-  opacity: 0.6;
+  background: radial-gradient(closest-side, var(--accent-800), transparent);
+  opacity: 0.18;
 }
 
-/* ---------- glass primitives ---------- */
+/* ---------- surfaces ----------
+   Box-shadow layers compose through non-inheriting custom properties, so `surface specular`
+   or `glass specular` stack their shadows instead of overwriting each other. */
 
+@property --gl-spec {
+  syntax: "*";
+  inherits: false;
+  initial-value: 0 0 transparent;
+}
+@property --gl-hl {
+  syntax: "*";
+  inherits: false;
+  initial-value: 0 0 transparent;
+}
+@property --gl-elev {
+  syntax: "*";
+  inherits: false;
+  initial-value: 0 0 transparent;
+}
+
+/* Default for cards, grouped lists and inputs. No backdrop-filter → cheap to scroll. */
+@utility surface {
+  background-color: var(--surface-1);
+  border: 0.5px solid var(--hairline);
+  --gl-hl: inset 0 1px 0 var(--highlight);
+  --gl-elev: var(--shadow-e1);
+  box-shadow: var(--gl-spec), var(--gl-hl), var(--gl-elev);
+}
+
+/* Floating chrome: tab bar, sidebar, toolbars, map overlays. */
 @utility glass {
-  position: relative;
-  background: var(--glass);
+  background-color: var(--surface-3);
   background-image: linear-gradient(var(--glass-tint), var(--glass-tint));
-  -webkit-backdrop-filter: blur(24px) saturate(1.6);
-  backdrop-filter: blur(24px) saturate(1.6);
-  border: 1px solid var(--glass-border-2);
-  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-border);
+  -webkit-backdrop-filter: var(--blur-glass);
+  backdrop-filter: var(--blur-glass);
+  border: 0.5px solid var(--hairline);
+  --gl-hl: inset 0 1px 0 var(--highlight);
+  --gl-elev: var(--shadow-e2);
+  box-shadow: var(--gl-spec), var(--gl-hl), var(--gl-elev);
 }
 
+/* Popovers, menus, toasts, sheets, dialogs. */
+@utility glass-thick {
+  background-color: var(--surface-4);
+  -webkit-backdrop-filter: var(--blur-thick);
+  backdrop-filter: var(--blur-thick);
+  border: 0.5px solid var(--hairline);
+  --gl-hl: inset 0 1px 0 var(--highlight);
+  --gl-elev: var(--shadow-e3);
+  box-shadow: var(--gl-spec), var(--gl-hl), var(--gl-elev);
+}
+
+/* v1 alias */
 @utility glass-strong {
-  position: relative;
-  background: var(--glass-strong);
-  -webkit-backdrop-filter: blur(32px) saturate(1.8);
-  backdrop-filter: blur(32px) saturate(1.8);
-  border: 1px solid var(--glass-border-2);
-  box-shadow: var(--glass-shadow-lg), inset 0 1px 0 var(--glass-border);
+  background-color: var(--surface-4);
+  -webkit-backdrop-filter: var(--blur-thick);
+  backdrop-filter: var(--blur-thick);
+  border: 0.5px solid var(--hairline);
+  --gl-hl: inset 0 1px 0 var(--highlight);
+  --gl-elev: var(--shadow-e3);
+  box-shadow: var(--gl-spec), var(--gl-hl), var(--gl-elev);
 }
 
-/* Specular highlight ring — apply to an element with rounded corners */
+/* Over the globe/graph. Blurs only while the map is still: put `data-map-moving` on an
+   ancestor during drag/rotation and the overlay swaps to an opaque fill (no per-frame blur). */
+@utility glass-map {
+  background-color: var(--surface-3);
+  -webkit-backdrop-filter: var(--blur-map);
+  backdrop-filter: var(--blur-map);
+  border: 0.5px solid var(--hairline);
+  transition: background-color var(--dur-base) var(--ease-out);
+  --gl-hl: inset 0 1px 0 var(--highlight);
+  --gl-elev: var(--shadow-e2);
+  box-shadow: var(--gl-spec), var(--gl-hl), var(--gl-elev);
+  :where([data-map-moving]) & {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background-color: var(--surface-map);
+  }
+}
+
+/* Cheap specular light: inset edge highlights only (no pseudo-element, no mask). */
 @utility specular {
+  --gl-spec: inset 0 1px 0 var(--specular-top), inset 0 0 0 0.5px var(--specular-edge), inset 0 -0.5px 0 var(--specular-bottom);
+  box-shadow: var(--gl-spec), var(--gl-hl), var(--gl-elev);
+}
+
+/* Elevation that composes with surface/glass/specular: `elevation-e3`, `elevation-e4`.
+   (Tailwind's `shadow-eN` replaces the whole box-shadow — fine on plain elements only.) */
+@utility elevation-* {
+  --gl-elev: --value(--shadow-*);
+  box-shadow: var(--gl-spec), var(--gl-hl), var(--gl-elev);
+}
+
+/* Hero-only gradient ring (masked ::after). Costs a layer — use sparingly. */
+@utility specular-ring {
   position: relative;
-}
-.specular::after {
-  content: "";
-  pointer-events: none;
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1px;
-  background: var(--specular);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  opacity: 0.9;
+  &::after {
+    content: "";
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: var(--specular);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    opacity: 0.9;
+  }
 }
 
+/* Press feedback: quick dip on press, spring back on release. */
 @utility pressable {
-  transition:
-    transform 180ms var(--ease-spring),
-    opacity 180ms var(--ease-spring),
-    box-shadow 180ms var(--ease-spring);
-}
-.pressable:active {
-  transform: scale(0.97);
-}
-
-@utility text-balance {
-  text-wrap: balance;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition-property: transform, opacity, background-color, box-shadow, color;
+  transition-duration: var(--spring-snappy-dur);
+  transition-timing-function: var(--spring-snappy);
+  &:active:not(:disabled, [data-disabled], [aria-disabled="true"]) {
+    transform: scale(0.97);
+    transition-duration: var(--dur-fast);
+    transition-timing-function: var(--ease-out);
+  }
 }
 
 @utility no-scrollbar {
   scrollbar-width: none;
-}
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 @utility safe-top {
@@ -266,77 +664,44 @@ body {
 @utility safe-bottom {
   padding-bottom: var(--sab);
 }
-
-/* Selection + focus */
-::selection {
-  background: color-mix(in oklab, var(--accent) 30%, transparent);
-}
-:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: 6px;
+@utility safe-x {
+  padding-left: var(--sal);
+  padding-right: var(--sar);
 }
 
-/* Tiptap editor */
-.tiptap {
-  outline: none;
-  min-height: 40vh;
-  line-height: 1.6;
-  font-size: 17px;
-}
-.tiptap p.is-editor-empty:first-child::before {
-  content: attr(data-placeholder);
-  color: var(--fg-4);
-  float: left;
-  pointer-events: none;
-  height: 0;
-}
-.tiptap h1 { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; margin: 0.6em 0 0.3em; }
-.tiptap h2 { font-size: 1.35rem; font-weight: 650; letter-spacing: -0.015em; margin: 0.8em 0 0.3em; }
-.tiptap h3 { font-size: 1.1rem; font-weight: 600; margin: 0.8em 0 0.2em; }
-.tiptap p { margin: 0.35em 0; }
-.tiptap ul, .tiptap ol { padding-left: 1.4em; margin: 0.35em 0; }
-.tiptap ul { list-style: disc; }
-.tiptap ol { list-style: decimal; }
-.tiptap a { color: var(--accent-strong); text-decoration: underline; text-underline-offset: 3px; }
-.tiptap blockquote { border-left: 3px solid var(--accent-300); padding-left: 1em; color: var(--fg-2); margin: 0.6em 0; }
-.tiptap code { font-family: var(--font-mono); font-size: 0.9em; background: var(--accent-soft); padding: 0.1em 0.35em; border-radius: 6px; }
-.tiptap hr { border: 0; border-top: 1px solid var(--glass-border-2); margin: 1.2em 0; }
-.tiptap ul[data-type="taskList"] { list-style: none; padding-left: 0.2em; }
-.tiptap ul[data-type="taskList"] li { display: flex; gap: 0.6em; align-items: flex-start; }
-.tiptap ul[data-type="taskList"] li > label { margin-top: 0.3em; }
-.tiptap ul[data-type="taskList"] li > label input {
-  appearance: none; width: 20px; height: 20px; border-radius: 9999px;
-  border: 1.5px solid var(--fg-4); display: grid; place-items: center; cursor: pointer;
-  transition: all 150ms var(--ease-spring);
-}
-.tiptap ul[data-type="taskList"] li > label input:checked {
-  background: var(--accent); border-color: var(--accent);
-}
-.tiptap ul[data-type="taskList"] li > label input:checked::after {
-  content: ""; width: 6px; height: 10px; border: solid var(--accent-fg);
-  border-width: 0 2px 2px 0; transform: translateY(-1px) rotate(45deg);
-}
-.tiptap ul[data-type="taskList"] li[data-checked="true"] > div { color: var(--fg-3); text-decoration: line-through; }
-.tiptap .mention {
-  color: var(--accent-strong); background: var(--accent-soft); border-radius: 8px; padding: 0.05em 0.4em; font-weight: 500;
+/* Minimum 44×44 hit area without changing the visual size. */
+@utility hit-44 {
+  position: relative;
+  &::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+  }
 }
 
-/* Motion-reduce */
+/* Selection + focus (base layer: `outline-none` / `focus-visible:*` utilities still win) */
+@layer base {
+  ::selection {
+    background: color-mix(in oklab, var(--accent) 30%, transparent);
+  }
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+}
+
+/* Motion-reduce: drop movement, keep state changes instant. */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
-
-/* Chat markdown */
-.prose-chat p { margin: 0.35em 0; }
-.prose-chat p:first-child { margin-top: 0; }
-.prose-chat p:last-child { margin-bottom: 0; }
-.prose-chat ul, .prose-chat ol { padding-left: 1.3em; margin: 0.4em 0; }
-.prose-chat ul { list-style: disc; }
-.prose-chat ol { list-style: decimal; }
-.prose-chat li { margin: 0.15em 0; }
-.prose-chat strong { font-weight: 600; }
-.prose-chat h1, .prose-chat h2, .prose-chat h3 { font-weight: 650; margin: 0.6em 0 0.25em; font-size: 1.05em; }
-.prose-chat code { font-family: var(--font-mono); font-size: 0.9em; background: var(--accent-soft); padding: 0.05em 0.3em; border-radius: 5px; }
-.prose-chat table { border-collapse: collapse; font-size: 0.92em; margin: 0.4em 0; }
-.prose-chat td, .prose-chat th { border: 1px solid var(--glass-border-2); padding: 0.25em 0.5em; }

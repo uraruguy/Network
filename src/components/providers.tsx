@@ -5,6 +5,10 @@ import { useState } from "react";
 import { makePersister, makeQueryClient, CACHE_VERSION } from "@/lib/offline/queryClient";
 import { registerPeopleMutations } from "@/lib/queries/people";
 import { registerNoteMutations } from "@/lib/queries/notes";
+import { spring } from "@/lib/motion";
+import { ThemeSync } from "@/components/shell/ThemeSync";
+import { ConfirmHost } from "@/components/ui/ConfirmDialog";
+import { ToastHost } from "@/components/ui/Toast";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [client] = useState(() => {
@@ -20,8 +24,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
       persistOptions={{ persister, buster: CACHE_VERSION, maxAge: 1000 * 60 * 60 * 24 * 14 }}
       onSuccess={() => client.resumePausedMutations().then(() => client.invalidateQueries())}
     >
-      <MotionConfig reducedMotion="user" transition={{ type: "spring", stiffness: 380, damping: 34 }}>
+      <MotionConfig reducedMotion="user" transition={spring.smooth}>
+        <ThemeSync />
         {children}
+        <ToastHost />
+        <ConfirmHost />
       </MotionConfig>
     </PersistQueryClientProvider>
   );
