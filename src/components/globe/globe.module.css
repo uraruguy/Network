@@ -1,0 +1,72 @@
+/* MapLibre chrome restyled with the design tokens. Scoped to the map container. */
+
+.map {
+  /* The space around the planet: a faint turquoise wash in light, deep slate in dark. */
+  background: radial-gradient(ellipse 80% 70% at 50% 46%, var(--accent-50), var(--bg) 72%);
+}
+:global(.dark) .map {
+  background: radial-gradient(ellipse 80% 70% at 50% 46%, var(--bg-3), var(--bg) 72%);
+}
+
+.map :global(.maplibregl-canvas) {
+  outline: none;
+}
+.map :global(.maplibregl-canvas:focus-visible) {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* Controls sit above the phone tab bar (the map runs underneath it). */
+.map :global(.maplibregl-ctrl-bottom-left),
+.map :global(.maplibregl-ctrl-bottom-right) {
+  bottom: var(--chrome-bottom);
+}
+
+/* Attribution: small, quiet, token-coloured. */
+.map :global(.maplibregl-ctrl-attrib) {
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--fg-3);
+  background-color: var(--surface-map);
+  border: 0.5px solid var(--hairline);
+}
+.map :global(.maplibregl-ctrl-attrib.maplibregl-compact) {
+  min-height: 18px;
+  margin: 8px;
+  border-radius: var(--r-full);
+  background-color: var(--surface-map);
+  color: var(--fg-3);
+}
+.map :global(.maplibregl-ctrl-attrib.maplibregl-compact-show) {
+  padding: 2px 10px 2px 26px;
+}
+.map :global(.maplibregl-ctrl-attrib-button) {
+  width: 20px;
+  height: 20px;
+  background-color: transparent;
+  background-size: 16px;
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: 0.55;
+}
+.map :global(.maplibregl-ctrl-attrib-button:focus-visible) {
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+:global(.dark) .map :global(.maplibregl-ctrl-attrib-button) {
+  filter: invert(1);
+}
+.map :global(.maplibregl-ctrl-attrib a) {
+  color: inherit;
+}
+
+/* HTML city pins (Marker elements). MapLibre fades them out behind the globe. */
+.pin {
+  z-index: 1;
+}
+.pin[data-selected] {
+  z-index: 3;
+}
+.pin:global(.maplibregl-marker-covered) {
+  pointer-events: none;
+}
