@@ -4,8 +4,8 @@ import { Plus } from "lucide-react";
 import { useState } from "react";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { useHydrated } from "@/components/shell/useHydrated";
+import { GlassButton } from "@/components/glass/GlassButton";
 import { IconButton } from "@/components/ui/IconButton";
-import { Tooltip } from "@/components/ui/Tooltip";
 import { useNow } from "@/lib/clock";
 import { formatDate } from "@/lib/format";
 import { useProfile } from "@/lib/queries/misc";
@@ -31,9 +31,13 @@ export function TodayHeader() {
         title={hydrated ? greeting(now, profile?.displayName) : <span className="invisible">Good evening</span>}
         compactTitle="Today"
         actions={
-          <Tooltip content="New person">
-            <IconButton variant="glass" size="lg" label="New person" icon={<Plus strokeWidth={2.4} />} onClick={() => setSheet("open")} />
-          </Tooltip>
+          <>
+            {/* Round glass button on phones (iOS nav bar), labelled on desktop. One is display:none. */}
+            <IconButton variant="glass" size="lg" label="New person" icon={<Plus strokeWidth={2.4} />} onClick={() => setSheet("open")} className="lg:hidden" />
+            <GlassButton variant="glass" onClick={() => setSheet("open")} className="hidden lg:inline-flex">
+              <Plus size={18} strokeWidth={2.4} aria-hidden /> New person
+            </GlassButton>
+          </>
         }
       />
       {sheet !== "idle" && <NewPersonSheet open={sheet === "open"} onClose={() => setSheet("closed")} />}

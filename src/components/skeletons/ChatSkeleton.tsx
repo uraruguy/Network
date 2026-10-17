@@ -17,7 +17,7 @@ export function ChatSkeleton({ header = true }: { header?: boolean }) {
   return (
     <>
       {header && <PageHeader title="Chat" />}
-      <SkeletonRegion label="Loading conversation" className="flex min-h-[50dvh] flex-col">
+      <SkeletonRegion label="Loading conversation" className="flex min-h-[calc(100dvh-var(--page-pt)-var(--page-pb)-7rem)] flex-col">
         <div className="flex-1 space-y-4">
           {BUBBLES.map((b, i) => (
             <div key={i} className={cn("flex", b.me ? "justify-end" : "justify-start")}>

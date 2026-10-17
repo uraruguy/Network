@@ -121,8 +121,9 @@
 }
 
 /* ---- Sync capsule (phones) ------------------------------------------- */
+/* Just under the nav bar, so it never covers the page title or bar buttons. */
 .sync-pill {
-  top: calc(var(--sat) + 6px);
+  top: calc(var(--bar-pt) + var(--bar-h) + 8px);
   opacity: 0;
   transform: translateY(-12px) scale(0.96);
   transition:

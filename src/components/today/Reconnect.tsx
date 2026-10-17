@@ -28,7 +28,7 @@ export function Reconnect({ className }: { className?: string }) {
     <Section
       id="reconnect"
       title="Reconnect"
-      caption="Close people you haven't been in touch with for two months"
+      caption="Close people you haven't talked to in two months"
       action={
         <Link href="/people?w=inner,active" className="font-medium text-accent-text">
           See all

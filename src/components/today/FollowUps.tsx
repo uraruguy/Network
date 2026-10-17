@@ -182,7 +182,8 @@ function ReminderItem({ r, now, onComplete, upcoming }: { r: ReminderWithPerson;
       >
         <motion.span
           animate={checked ? { scale: [1, 1.22, 1] } : { scale: 1 }}
-          transition={spring.pop}
+          // Keyframed pop: springs only take two keyframes.
+          transition={{ duration: 0.34, times: [0, 0.38, 1], ease: ease.out }}
           className={cn(
             "grid size-[24px] place-items-center rounded-full border-[1.5px] transition-colors duration-200 group-focus-visible:outline-2 group-focus-visible:outline-offset-2 group-focus-visible:outline-[var(--focus-ring)]",
             checked ? "border-accent-fill bg-accent-fill text-accent-fg" : "border-fg-4 [@media(hover:hover)]:group-hover:border-accent",
