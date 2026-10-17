@@ -1,270 +1,660 @@
 "use client";
+import {
+  AtSign,
+  Bell,
+  Briefcase,
+  Cake,
+  Camera,
+  ChevronLeft,
+  ClipboardPaste,
+  Copy,
+  ExternalLink,
+  FileText,
+  Globe,
+  Languages,
+  Link2,
+  Mail,
+  MapPin,
+  MessageCircle,
+  MessageSquareText,
+  MoreHorizontal,
+  NotebookPen,
+  Pencil,
+  Phone,
+  Plus,
+  Sparkles,
+  Trash2,
+  UserRound,
+  Users,
+} from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { ArrowLeft, AtSign, Bell, Cake, Camera, Clock, Globe, Link2, Mail, MapPin, MoreHorizontal, Pencil, Phone, Plus, Sparkles, Trash2, Users } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Avatar } from "@/components/glass/Avatar";
 import { Chip } from "@/components/glass/Chip";
 import { GlassButton } from "@/components/glass/GlassButton";
-import { GlassCard } from "@/components/glass/GlassCard";
-import { GlassSheet } from "@/components/glass/GlassSheet";
-import { useCreateNote } from "@/lib/queries/notes";
-import { useDeletePerson, usePerson } from "@/lib/queries/people";
-import type { PersonDetail as PersonDetailT } from "@/lib/queries/types";
-import { cn, flag, formatDate, formatRelative, localTimeIn, WARMTH_META } from "@/lib/utils";
+import { FollowUpSheet } from "@/components/followups/FollowUpSheet";
+import { QuickImportSheet } from "@/components/import/QuickImportSheet";
+import { PersonNotesSection } from "@/components/notes/PersonNotesSection";
+import { confirm } from "@/components/ui/confirm";
+import { ContextMenu } from "@/components/ui/ContextMenu";
+import { formatBirthday, parseBirthday } from "@/components/ui/date/BirthdayPicker";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { IconButton } from "@/components/ui/IconButton";
+import { InsetGroup } from "@/components/ui/InsetGroup";
+import { ListRow } from "@/components/ui/ListRow";
+import { Menu, type MenuItem } from "@/components/ui/Menu";
+import { Skeleton, SkeletonRows } from "@/components/ui/Skeleton";
+import { toast } from "@/components/ui/Toast";
+import { useNow } from "@/lib/clock";
+import { formatDate, formatRelative, localTimeIn } from "@/lib/format";
+import { useCategories, usePersonProfile, usePersonWrites } from "@/lib/queries/people";
+import { isTempId } from "@/lib/queries/people-cache";
+import { useActivities } from "@/lib/queries/taxonomy";
+import type { IndexLocation, PersonDetailApi, PersonIndexRow } from "@/lib/queries/types";
+import { cn, flag, WARMTH_META } from "@/lib/utils";
 import { CategoryIcon } from "./CategoryIcon";
 import { CircleBadge } from "./CirclePicker";
-import { HobbyChips } from "./HobbyPicker";
+import { contactLinks, offsetDiffMinutes, offsetLabel, type ContactKind, type ContactLink } from "./contact";
 import { EditPersonSheet } from "./PersonSheet";
-import { NoteRow } from "@/components/notes/NoteRow";
-import { ReminderSheet } from "./ReminderSheet";
 import { ReminderRow } from "./ReminderRow";
-import { useReminders } from "@/lib/queries/reminders";
-import { useSearchParams } from "next/navigation";
+import { WarmthDot } from "./WarmthPicker";
 
-export function PersonDetail({ id, initial }: { id: string; initial?: PersonDetailT }) {
-  const router = useRouter();
-  const { data: p, isPending, error } = usePerson(id);
-  const person = p ?? initial;
-  const searchParams = useSearchParams();
-  const [edit, setEdit] = useState(false);
-  const [menu, setMenu] = useState(false);
-  const [reminder, setReminder] = useState(() => searchParams.get("reminder") === "1");
-  const { data: reminders = [] } = useReminders({ personId: id });
-  const del = useDeletePerson();
-  const createNote = useCreateNote();
-  const [, tick] = useState(0);
+const CONTACT_ICON: Record<ContactKind, ReactNode> = {
+  sms: <MessageCircle />,
+  call: <Phone />,
+  whatsapp: <MessageSquareText />,
+  email: <Mail />,
+  linkedin: <Link2 />,
+  x: <AtSign />,
+  instagram: <Camera />,
+  website: <Globe />,
+};
+
+const firstName = (name: string) => name.trim().split(/\s+/)[0] ?? name;
+
+/** What the header needs — available from the cached index row before the detail arrives. */
+type Head = Pick<PersonIndexRow, "id" | "displayName" | "avatarUrl" | "headline" | "company" | "warmth" | "circle" | "categoryIds"> & { homeLocation: IndexLocation | null };
+
+function openLink(l: Pick<ContactLink, "href" | "external">) {
+  if (l.external) window.open(l.href, "_blank", "noopener,noreferrer");
+  else window.location.href = l.href;
+}
+
+async function copy(text: string, what: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast.success(`${what} copied`, { duration: 2000 });
+  } catch {
+    toast.error("Couldn’t copy");
+  }
+}
+
+/** True once `ref` has scrolled under the top bar. */
+function useScrolledPast(ref: React.RefObject<HTMLElement | null>, enabled: boolean) {
+  const [past, setPast] = useState(false);
   useEffect(() => {
-    const t = setInterval(() => tick((n) => n + 1), 30_000);
-    return () => clearInterval(t);
-  }, []);
+    const el = ref.current;
+    if (!el || !enabled) return;
+    const io = new IntersectionObserver(([e]) => setPast(!e!.isIntersecting && e!.boundingClientRect.top < 0), { rootMargin: "-56px 0px 0px 0px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [ref, enabled]);
+  return past;
+}
 
-  if (!person) {
-    if (isPending) return <div className="glass h-48 animate-pulse rounded-[var(--r-lg)]" />;
-    return <GlassCard>{error?.message ?? "Not found"}</GlassCard>;
+/**
+ * A person's profile, Apple Contacts-style: big centered avatar and name, round quick actions,
+ * then inset-grouped sections. Renders instantly from the cached index row while the full
+ * detail loads; every action is optimistic.
+ */
+export function PersonDetail({ id }: { id: string }) {
+  const router = useRouter();
+  const params = useSearchParams();
+  const now = useNow();
+  const writes = usePersonWrites();
+  const { person, preview, notFound } = usePersonProfile(id);
+  const { data: categories } = useCategories();
+  const { data: activities } = useActivities();
+  const [editing, setEditing] = useState(false);
+  const [followUp, setFollowUp] = useState(() => params.get("reminder") === "1");
+  const [importing, setImporting] = useState(false);
+  const nameRef = useRef<HTMLHeadingElement>(null);
+
+  const head: Head | undefined = person ?? preview;
+  const compact = useScrolledPast(nameRef, !!head);
+
+  const back = () => (window.history.length > 1 ? router.back() : router.push("/people"));
+
+  if (!head) {
+    if (notFound) {
+      return (
+        <div className="mx-auto max-w-2xl">
+          <TopBar onBack={back} title="" compact={false} />
+          <EmptyState
+            icon={<UserRound />}
+            title="Not in your Network"
+            description="This person was removed, or the link is wrong."
+            action={
+              <GlassButton variant="soft" onClick={() => router.push("/people")}>
+                All people
+              </GlassButton>
+            }
+          />
+        </div>
+      );
+    }
+    return <ProfileSkeleton onBack={back} />;
   }
 
-  const localTime = localTimeIn(person.homeLocation?.timezone);
-  const sub = [person.headline, person.company].filter(Boolean).join(" · ");
+  const name = head.displayName;
+  const first = firstName(name);
+  const links = person ? contactLinks(person) : [];
+  const messageLinks = links.filter((l) => l.kind !== "website");
+  const cats = person?.categories ?? (categories ?? []).filter((c) => head.categoryIds.includes(c.id));
+  const tz = head.homeLocation?.timezone ?? null;
+  const localTime = localTimeIn(tz, now);
+  const ahead = offsetLabel(offsetDiffMinutes(tz, now));
+  const role = [head.headline, head.company].filter(Boolean).join(" · ");
 
-  const newNote = () =>
-    createNote.mutate(
-      { personId: person.id, contentMd: "", contentText: "", kind: "note", mentionIds: [], pinned: false },
-      { onSuccess: (n) => router.push(`/people/${person.id}/notes/${n.id}`) },
-    );
+  const newNote = () => router.push(`/people/${id}/notes/${crypto.randomUUID()}`);
+
+  const remove = async () => {
+    const ok = await confirm({
+      title: `Remove ${name}?`,
+      message: "Their notes and follow-ups go with them. You can undo right after.",
+      confirmLabel: "Remove",
+      destructive: true,
+    });
+    if (!ok) return;
+    writes.remove(id);
+    router.replace("/people");
+    toast.undo(`${name} removed`, () => {
+      writes.restore(id).catch(() => {});
+      router.push(`/people/${id}`);
+    });
+  };
+
+  const moreItems: MenuItem[] = [
+    { label: "Edit", icon: <Pencil />, onSelect: () => setEditing(true), shortcut: "E" },
+    { label: "Add follow-up", icon: <Bell />, onSelect: () => setFollowUp(true) },
+    { label: "Paste from Apple Notes", icon: <ClipboardPaste />, onSelect: () => setImporting(true) },
+    "separator",
+    { label: "Remove from Network", icon: <Trash2 />, destructive: true, onSelect: () => void remove() },
+  ];
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <Link href="/people" className="pressable inline-flex h-9 items-center gap-1 rounded-full pr-3 pl-1.5 text-[15px] font-medium text-accent-strong hover:bg-accent-soft">
-          <ArrowLeft size={18} /> People
-        </Link>
-        <div className="flex gap-2">
-          <GlassButton size="iconSm" onClick={() => setEdit(true)} aria-label="Edit"><Pencil size={15} /></GlassButton>
-          <GlassButton size="iconSm" onClick={() => setMenu(true)} aria-label="More"><MoreHorizontal size={16} /></GlassButton>
-        </div>
-      </div>
+    <div className="mx-auto max-w-2xl pb-6">
+      <TopBar
+        onBack={back}
+        title={name}
+        compact={compact}
+        right={
+          <>
+            <GlassButton variant="plain" size="sm" onClick={() => setEditing(true)} disabled={!person}>
+              Edit
+            </GlassButton>
+            <Menu title={name} items={moreItems} trigger={<IconButton label="More" variant="plain" icon={<MoreHorizontal strokeWidth={2.2} />} disabled={!person} />} />
+          </>
+        }
+      />
 
       {/* Header */}
-      <GlassCard strong className="relative overflow-hidden">
-        <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-accent/15 blur-3xl" />
-        <div className="flex items-start gap-4">
-          <Avatar name={person.displayName} src={person.avatarUrl} size={72} className="shadow-lg" />
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-[26px] font-bold tracking-tight leading-tight">{person.displayName}</h1>
-            {sub && <p className="mt-0.5 text-[15px] text-fg-2">{sub}</p>}
-            <div className="mt-2 space-y-1 text-[14px] text-fg-2">
-              {person.homeLocation && (
-                <p className="flex items-center gap-1.5">
-                  <MapPin size={14} className="shrink-0 text-accent-strong" />
-                  <span className="truncate">
-                    {flag(person.homeLocation.countryCode)} {person.homeLocation.name}, {person.homeLocation.country}
-                  </span>
-                </p>
-              )}
-              <p className="flex items-center gap-3">
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full" style={{ background: WARMTH_META[person.warmth].color }} />
-                  {WARMTH_META[person.warmth].label}
-                </span>
-                {localTime && (
-                  <span className="inline-flex items-center gap-1 text-fg-3">
-                    <Clock size={13} /> {localTime} their time
-                  </span>
-                )}
-              </p>
-            </div>
-          </div>
-        </div>
-        {(person.categories.length > 0 || person.circle) && (
-          <div className="mt-4 flex flex-wrap gap-1.5">
-            {person.categories.map((c) => (
-              <Chip key={c.id} color={c.color}>
-                <CategoryIcon name={c.icon} size={13} />
-                {c.name}
-              </Chip>
-            ))}
-            <CircleBadge circle={person.circle} />
-          </div>
-        )}
-        {person.hobbies.length > 0 && (
-          <div className="mt-3">
-            <HobbyChips hobbies={person.hobbies} other={person.hobbiesOther} size="md" />
-          </div>
-        )}
-        <div className="mt-4 flex gap-2">
-          <GlassButton variant="primary" onClick={newNote} disabled={createNote.isPending}>
-            <Plus size={18} strokeWidth={2.5} /> Note
-          </GlassButton>
-          <GlassButton onClick={() => setReminder(true)}>
-            <Bell size={17} /> Follow up
-          </GlassButton>
-          <GlassButton onClick={() => router.push(`/chat?person=${person.id}`)}>
-            <Sparkles size={17} /> Ask
-          </GlassButton>
-        </div>
-      </GlassCard>
-
-      {/* How we met */}
-      {(person.metContext || person.metAt || person.metLocation || person.introducedBy) && (
-        <GlassCard>
-          <h2 className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-fg-3">How we met</h2>
-          {person.metContext && <p className="whitespace-pre-wrap text-[15.5px] leading-relaxed">{person.metContext}</p>}
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[14px] text-fg-2">
-            {person.metAt && <span>{formatDate(person.metAt)}</span>}
-            {person.metLocation && <span>{flag(person.metLocation.countryCode)} {person.metLocation.name}</span>}
-            {person.introducedBy && (
-              <Link href={`/people/${person.introducedBy.id}`} className="inline-flex items-center gap-1.5 text-accent-strong">
-                <Users size={14} /> via {person.introducedBy.displayName}
+      <header className="flex flex-col items-center px-2 pt-2 pb-5 text-center">
+        <span className="rounded-full elevation-e2" style={{ viewTransitionName: `avatar-${id}` } as CSSProperties}>
+          <Avatar name={name} src={head.avatarUrl} size={104} />
+        </span>
+        <h1 ref={nameRef} className="mt-3.5 max-w-full text-title1 text-balance text-fg">
+          {name}
+        </h1>
+        {role && <p className="mt-1 max-w-full text-subhead text-balance text-fg-2">{role}</p>}
+        {(head.homeLocation || localTime) && (
+          <p className="mt-1.5 flex max-w-full flex-wrap items-center justify-center gap-x-1.5 text-footnote text-fg-3">
+            {head.homeLocation && (
+              <Link href={`/people?city=${head.homeLocation.id}`} className="pressable inline-flex items-center gap-1 rounded-full hover:text-fg-2">
+                <span aria-hidden>{flag(head.homeLocation.countryCode)}</span>
+                {head.homeLocation.name}
               </Link>
             )}
-          </div>
-        </GlassCard>
-      )}
-
-      {/* Follow-ups */}
-      {reminders.length > 0 && (
-        <section>
-          <h2 className="mb-2 px-1 text-[13px] font-semibold uppercase tracking-wide text-fg-3">Follow-ups</h2>
-          <GlassCard padded={false} className="p-1.5">
-            <ul className="divide-y divide-[var(--glass-border-2)]">
-              {reminders.map((r) => (
-                <li key={r.id}><ReminderRow r={r} showPerson={false} /></li>
-              ))}
-            </ul>
-          </GlassCard>
-        </section>
-      )}
-
-      {/* Notes */}
-      <section>
-        <div className="mb-2 flex items-center justify-between px-1">
-          <h2 className="text-[13px] font-semibold uppercase tracking-wide text-fg-3">Notes · {person.notes.length}</h2>
-          <button onClick={newNote} className="text-[14px] font-medium text-accent-strong">New note</button>
-        </div>
-        {person.notes.length === 0 ? (
-          <GlassCard interactive onClick={newNote} className="text-center text-fg-2">
-            <p className="text-[15px]">No notes yet. Tap to write the first one.</p>
-          </GlassCard>
-        ) : (
-          <GlassCard padded={false} className="p-1.5">
-            <ul className="divide-y divide-[var(--glass-border-2)]">
-              {person.notes.map((n) => (
-                <li key={n.id}><NoteRow note={n} href={`/people/${person.id}/notes/${n.id}`} /></li>
-              ))}
-            </ul>
-          </GlassCard>
+            {localTime && (
+              <>
+                {head.homeLocation && <span aria-hidden>·</span>}
+                <span className="tabular-nums" suppressHydrationWarning>
+                  {localTime}
+                  {ahead ? ` · ${ahead}` : ""}
+                </span>
+              </>
+            )}
+          </p>
         )}
-      </section>
-
-      {/* Introduced + mentioned */}
-      {(person.introduced.length > 0 || person.mentions.length > 0) && (
-        <GlassCard>
-          {person.introduced.length > 0 && (
-            <>
-              <h2 className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-fg-3">Introduced me to</h2>
-              <div className="flex flex-wrap gap-2">
-                {person.introduced.map((q) => (
-                  <Link key={q.id} href={`/people/${q.id}`} className="pressable glass flex items-center gap-2 rounded-full py-1 pl-1 pr-3 text-[14px]">
-                    <Avatar name={q.displayName} src={q.avatarUrl} size={26} /> {q.displayName}
-                  </Link>
-                ))}
-              </div>
-            </>
-          )}
-          {person.mentions.length > 0 && (
-            <>
-              <h2 className={cn("mb-2 text-[13px] font-semibold uppercase tracking-wide text-fg-3", person.introduced.length > 0 && "mt-4")}>Mentioned in</h2>
-              <ul className="space-y-1">
-                {person.mentions.map((m) => (
-                  <li key={m.note.id}>
-                    <Link href={`/people/${m.note.personId}/notes/${m.note.id}`} className="block truncate text-[14.5px] text-accent-strong">
-                      {m.note.title || m.note.contentText.slice(0, 80) || "Untitled"} <span className="text-fg-3">· {formatRelative(m.note.occurredAt)}</span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-        </GlassCard>
-      )}
-
-      {/* Contact + about */}
-      {(person.email || person.phone || person.linkedin || person.xHandle || person.instagram || person.website || person.birthday || person.howICanHelp || person.whatICanAsk) && (
-        <GlassCard>
-          <h2 className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-fg-3">Details</h2>
-          <ul className="space-y-1.5 text-[15px]">
-            {person.email && <ContactLine icon={Mail} href={`mailto:${person.email}`}>{person.email}</ContactLine>}
-            {person.phone && <ContactLine icon={Phone} href={`tel:${person.phone}`}>{person.phone}</ContactLine>}
-            {person.linkedin && <ContactLine icon={Link2} href={person.linkedin.startsWith("http") ? person.linkedin : `https://linkedin.com/in/${person.linkedin}`}>{person.linkedin.replace(/^https?:\/\/(www\.)?/, "")}</ContactLine>}
-            {person.xHandle && <ContactLine icon={AtSign} href={`https://x.com/${person.xHandle.replace(/^@/, "")}`}>{person.xHandle}</ContactLine>}
-            {person.instagram && <ContactLine icon={Camera} href={`https://instagram.com/${person.instagram.replace(/^@/, "")}`}>{person.instagram}</ContactLine>}
-            {person.website && <ContactLine icon={Globe} href={person.website.startsWith("http") ? person.website : `https://${person.website}`}>{person.website.replace(/^https?:\/\//, "")}</ContactLine>}
-            {person.birthday && <ContactLine icon={Cake}>{formatDate(person.birthday, { year: undefined })}</ContactLine>}
-          </ul>
-          {person.howICanHelp && <Detail label="How I can help them">{person.howICanHelp}</Detail>}
-          {person.whatICanAsk && <Detail label="What I can ask them">{person.whatICanAsk}</Detail>}
-        </GlassCard>
-      )}
-
-      <p className="px-1 text-center text-[12px] text-fg-4">Added {formatDate(person.createdAt)}{person.sourceKind === "apple-notes" ? " · imported from Apple Notes" : ""}</p>
-
-      <EditPersonSheet person={person} open={edit} onClose={() => setEdit(false)} />
-      <ReminderSheet personId={person.id} personName={person.displayName.split(" ")[0] ?? person.displayName} open={reminder} onClose={() => setReminder(false)} />
-      <GlassSheet open={menu} onClose={() => setMenu(false)} title={person.displayName} width={420}>
-        <div className="space-y-2 pb-2">
-          <GlassButton className="w-full justify-start" onClick={() => { setMenu(false); setEdit(true); }}><Pencil size={16} /> Edit details</GlassButton>
-          <GlassButton
-            variant="danger"
-            className="w-full justify-start"
-            onClick={() => {
-              if (!confirm(`Remove ${person.displayName} from your Network?`)) return;
-              del.mutate(person.id, { onSuccess: () => router.replace("/people") });
-            }}
-          >
-            <Trash2 size={16} /> Remove person
-          </GlassButton>
+        <div className="mt-3 flex max-w-full flex-wrap items-center justify-center gap-1.5">
+          <Chip size="sm">
+            <WarmthDot warmth={head.warmth} className="size-2" />
+            {WARMTH_META[head.warmth].label}
+          </Chip>
+          {cats.map((c) => (
+            <Link key={c.id} href={`/people?cat=${c.id}`} className="pressable rounded-full">
+              <Chip size="sm" color={c.color}>
+                <CategoryIcon name={c.icon} size={12} aria-hidden />
+                {c.name}
+              </Chip>
+            </Link>
+          ))}
+          <CircleBadge circle={head.circle} />
         </div>
-      </GlassSheet>
+      </header>
+
+      {/* Quick actions */}
+      <div className="mb-7 grid grid-cols-4 gap-2 px-1 sm:px-6">
+        <QuickAction icon={<NotebookPen />} label="Note" onClick={newNote} />
+        <QuickAction icon={<Bell />} label="Follow up" onClick={() => setFollowUp(true)} disabled={!person} />
+        {messageLinks.length ? (
+          <Menu
+            title={`Reach ${first}`}
+            align="center"
+            items={messageLinks.map((l) => ({ label: `${l.label} · ${l.value}`, icon: CONTACT_ICON[l.kind], onSelect: () => openLink(l) }))}
+            trigger={<QuickAction icon={<MessageCircle />} label="Message" />}
+          />
+        ) : (
+          <QuickAction icon={<MessageCircle />} label="Message" disabled title={person ? "Add a phone, email or handle to reach them" : undefined} />
+        )}
+        <QuickAction icon={<Sparkles />} label="Ask" onClick={() => router.push(`/chat?person=${id}`)} />
+      </div>
+
+      {!person ? (
+        <div className="surface overflow-hidden rounded-lg">
+          <SkeletonRows count={4} avatar={false} />
+        </div>
+      ) : (
+        <div className="space-y-7">
+          <FollowUpsSection person={person} onAdd={() => setFollowUp(true)} />
+
+          <div className="space-y-3">
+            <PersonNotesSection personId={id} personName={name} />
+            <InsetGroup>
+              <ListRow icon={<ClipboardPaste />} label="Paste from Apple Notes" description={`AI files it as notes on ${first}`} onClick={() => setImporting(true)} chevron />
+            </InsetGroup>
+          </div>
+
+          <ActivitiesSection person={person} activities={activities} onEdit={() => setEditing(true)} />
+          <TagsSection person={person} onEdit={() => setEditing(true)} />
+          <HowWeMet person={person} />
+          <Connections person={person} />
+          <Mentions person={person} />
+          <Details person={person} links={links} now={now} />
+
+          <p className="px-4 pt-1 text-center text-caption text-fg-4">
+            Added {formatDate(person.createdAt)}
+            {person.lastInteractionAt ? ` · last in touch ${formatRelative(person.lastInteractionAt, now)}` : ""}
+            {person.sourceKind === "apple-notes" ? " · from Apple Notes" : ""}
+          </p>
+        </div>
+      )}
+
+      {person && <EditPersonSheet person={person} open={editing} onClose={() => setEditing(false)} />}
+      <FollowUpSheet open={followUp} onOpenChange={setFollowUp} personId={id} personName={name} />
+      <QuickImportSheet open={importing} onOpenChange={setImporting} personId={id} personName={name} />
+      <EditShortcut onEdit={() => person && setEditing(true)} />
     </div>
   );
 }
 
-function ContactLine({ icon: Icon, href, children }: { icon: React.ComponentType<{ size?: number; className?: string }>; href?: string; children: React.ReactNode }) {
-  const inner = (
-    <span className="inline-flex items-center gap-2.5">
-      <Icon size={15} className="text-fg-3" />
-      <span className="truncate">{children}</span>
-    </span>
-  );
-  return <li>{href ? <a href={href} target={href.startsWith("http") ? "_blank" : undefined} rel="noreferrer" className="text-accent-strong hover:underline">{inner}</a> : inner}</li>;
+/** "E" opens Edit (desktop), when nothing else has focus. */
+function EditShortcut({ onEdit }: { onEdit: () => void }) {
+  const cb = useRef(onEdit);
+  useEffect(() => {
+    cb.current = onEdit;
+  }, [onEdit]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== "e" || e.metaKey || e.ctrlKey || e.altKey || e.repeat || e.defaultPrevented) return;
+      const t = (document.activeElement ?? e.target) as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.closest("[role=dialog],[role=menu],[role=listbox]"))) return;
+      e.preventDefault();
+      cb.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  return null;
 }
 
-function Detail({ label, children }: { label: string; children: React.ReactNode }) {
+/* ------------------------------------------------------------------ */
+/*  Chrome                                                             */
+/* ------------------------------------------------------------------ */
+
+function TopBar({ onBack, title, compact, right }: { onBack: () => void; title: string; compact: boolean; right?: ReactNode }) {
   return (
-    <div className="mt-3">
-      <p className="text-[12px] font-medium text-fg-3">{label}</p>
-      <p className="mt-0.5 whitespace-pre-wrap text-[15px] leading-relaxed">{children}</p>
+    <div
+      className={cn(
+        "sticky top-0 z-20 -mx-4 -mt-[calc(12px+var(--sat))] mb-1 px-2 pt-[var(--sat)] transition-[background-color,box-shadow,backdrop-filter] duration-200 sm:-mx-6 sm:px-4 lg:-mx-10 lg:-mt-8 lg:px-8 lg:pt-0",
+        compact ? "glass border-b-[0.5px] border-separator" : "bg-transparent",
+      )}
+    >
+      <div className="grid h-13 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
+        <div className="justify-self-start">
+          <button
+            type="button"
+            onClick={onBack}
+            className="pressable -ml-1 inline-flex h-11 items-center gap-0.5 rounded-full pr-3 pl-1 text-body text-accent-text hover:bg-accent-soft"
+          >
+            <ChevronLeft size={24} strokeWidth={2.4} aria-hidden />
+            People
+          </button>
+        </div>
+        <span
+          aria-hidden={!compact}
+          className={cn(
+            "max-w-[52vw] truncate text-headline text-fg transition-[opacity,transform] duration-200 motion-reduce:transition-none sm:max-w-[320px]",
+            compact ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0",
+          )}
+        >
+          {title}
+        </span>
+        <div className="flex items-center gap-0.5 justify-self-end">{right}</div>
+      </div>
     </div>
+  );
+}
+
+function QuickAction({ icon, label, onClick, disabled, title, ...rest }: { icon: ReactNode; label: string; onClick?: () => void; disabled?: boolean; title?: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className="pressable group/qa flex min-w-0 flex-col items-center gap-1.5 rounded-md py-1 outline-offset-2 disabled:pointer-events-none disabled:opacity-40"
+      {...rest}
+    >
+      <span className="glass specular grid size-[52px] place-items-center rounded-full text-accent-text transition-colors duration-150 group-hover/qa:bg-accent-soft [&_svg]:size-[22px]" aria-hidden>
+        {icon}
+      </span>
+      <span className="max-w-full truncate text-caption font-medium text-accent-text">{label}</span>
+    </button>
+  );
+}
+
+function ProfileSkeleton({ onBack }: { onBack: () => void }) {
+  return (
+    <div className="mx-auto max-w-2xl" role="status" aria-label="Loading">
+      <TopBar onBack={onBack} title="" compact={false} />
+      <div className="flex flex-col items-center pt-2 pb-5">
+        <Skeleton className="size-[104px] rounded-full" />
+        <Skeleton className="mt-4 h-7 w-48 rounded-full" />
+        <Skeleton className="mt-2.5 h-4 w-36 rounded-full" />
+        <Skeleton className="mt-2 h-3.5 w-28 rounded-full" />
+      </div>
+      <div className="mb-7 grid grid-cols-4 gap-2 px-1 sm:px-6">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="flex flex-col items-center gap-1.5 py-1">
+            <Skeleton className="size-[52px] rounded-full" />
+            <Skeleton className="h-3 w-12 rounded-full" />
+          </div>
+        ))}
+      </div>
+      <div className="surface overflow-hidden rounded-lg">
+        <SkeletonRows count={4} avatar={false} />
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Sections                                                           */
+/* ------------------------------------------------------------------ */
+
+function FollowUpsSection({ person, onAdd }: { person: PersonDetailApi; onAdd: () => void }) {
+  const reminders = person.reminders ?? [];
+  return (
+    <InsetGroup
+      header={reminders.length > 1 ? "Follow-ups" : "Next follow-up"}
+      headerAction={
+        reminders.length > 0 ? (
+          <button type="button" onClick={onAdd} className="hit-44 relative inline-flex items-center gap-1 font-medium text-accent-text">
+            <Plus size={14} strokeWidth={2.6} aria-hidden />
+            Add
+          </button>
+        ) : undefined
+      }
+    >
+      {reminders.length ? (
+        reminders.map((r) => <ReminderRow key={r.id} r={r} showPerson={false} personName={person.displayName} className="border-b-[0.5px] border-separator last:border-b-0" />)
+      ) : (
+        <ListRow icon={<Bell />} label="Set a follow-up" description={`Get a nudge to reach out to ${firstName(person.displayName)}`} onClick={onAdd} chevron />
+      )}
+    </InsetGroup>
+  );
+}
+
+function ActivitiesSection({ person, activities, onEdit }: { person: PersonDetailApi; activities?: { id: string; name: string; emoji: string | null }[]; onEdit: () => void }) {
+  const byId = useMemo(() => new Map((activities ?? []).map((a) => [a.id, a])), [activities]);
+  const list = person.activityIds.map((aid) => byId.get(aid)).filter((a): a is NonNullable<typeof a> => !!a);
+  if (!list.length) return null;
+  return (
+    <InsetGroup header="Do together" headerAction={<EditLink onClick={onEdit} />}>
+      <div className="flex flex-wrap gap-2 p-3">
+        {list.map((a) => (
+          <Link key={a.id} href={`/people?act=${a.id}`} className="pressable rounded-full">
+            <Chip>
+              {a.emoji && (
+                <span aria-hidden className="text-subhead leading-none">
+                  {a.emoji}
+                </span>
+              )}
+              {a.name}
+            </Chip>
+          </Link>
+        ))}
+      </div>
+    </InsetGroup>
+  );
+}
+
+function TagsSection({ person, onEdit }: { person: PersonDetailApi; onEdit: () => void }) {
+  if (!person.tags?.length) return null;
+  return (
+    <InsetGroup header="Who they are" headerAction={<EditLink onClick={onEdit} />}>
+      <div className="flex flex-wrap gap-2 p-3">
+        {person.tags.map((t) =>
+          isTempId(t.id) ? (
+            <Chip key={t.id} color={t.color ?? undefined}>
+              {t.name}
+            </Chip>
+          ) : (
+            <Link key={t.id} href={`/people?tag=${t.id}`} className="pressable rounded-full">
+              <Chip color={t.color ?? undefined}>{t.name}</Chip>
+            </Link>
+          ),
+        )}
+      </div>
+    </InsetGroup>
+  );
+}
+
+function EditLink({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="hit-44 relative font-medium text-accent-text">
+      Edit
+    </button>
+  );
+}
+
+function HowWeMet({ person }: { person: PersonDetailApi }) {
+  const { metContext, metAt, metLocation, introducedBy } = person;
+  if (!metContext && !metAt && !metLocation && !introducedBy) return null;
+  return (
+    <InsetGroup header="How we met">
+      {metContext && (
+        <div className="relative px-4 py-3 after:absolute after:right-0 after:bottom-0 after:left-4 after:h-[0.5px] after:bg-separator last:after:hidden">
+          <p className="text-body whitespace-pre-wrap text-fg select-text">{metContext}</p>
+        </div>
+      )}
+      {metAt && <ListRow label="Met on" value={formatDate(metAt)} />}
+      {metLocation && (
+        <ListRow
+          label="Met in"
+          value={
+            <>
+              <span aria-hidden>{flag(metLocation.countryCode)} </span>
+              {metLocation.name}
+            </>
+          }
+        />
+      )}
+      {introducedBy && (
+        <ListRow
+          leading={<Avatar name={introducedBy.displayName} src={introducedBy.avatarUrl} size={30} />}
+          label={introducedBy.displayName}
+          description="Introduced you"
+          href={`/people/${introducedBy.id}`}
+        />
+      )}
+    </InsetGroup>
+  );
+}
+
+function Connections({ person }: { person: PersonDetailApi }) {
+  if (!person.introduced?.length) return null;
+  return (
+    <InsetGroup header="Connections" footer={`People ${firstName(person.displayName)} introduced you to.`}>
+      {person.introduced.map((p) => (
+        <ListRow key={p.id} leading={<Avatar name={p.displayName} src={p.avatarUrl} size={30} />} label={p.displayName} description={p.headline ?? undefined} href={`/people/${p.id}`} />
+      ))}
+    </InsetGroup>
+  );
+}
+
+function Mentions({ person }: { person: PersonDetailApi }) {
+  const now = useNow();
+  if (!person.mentions?.length) return null;
+  return (
+    <InsetGroup header="Mentioned in">
+      {person.mentions.map(({ note }) => (
+        <ListRow
+          key={note.id}
+          icon={<FileText />}
+          label={note.title || note.excerpt?.split("\n")[0] || "Untitled note"}
+          description={`${note.personName}’s note · ${formatRelative(note.occurredAt, now)}`}
+          href={`/people/${note.personId}/notes/${note.id}`}
+        />
+      ))}
+    </InsetGroup>
+  );
+}
+
+function birthdayNote(birthday: string, now: number): string | null {
+  const b = parseBirthday(birthday);
+  if (!b) return null;
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  let next = new Date(today.getFullYear(), b.month - 1, b.day);
+  if (next < today) next = new Date(today.getFullYear() + 1, b.month - 1, b.day);
+  const days = Math.round((next.getTime() - today.getTime()) / 86_400_000);
+  const turns = b.year ? next.getFullYear() - b.year : null;
+  if (days === 0) return turns ? `Today · turns ${turns}` : "Today";
+  if (days <= 30) return `In ${days} day${days === 1 ? "" : "s"}${turns ? ` · turns ${turns}` : ""}`;
+  return turns ? `${turns - 1} years old` : null;
+}
+
+function Details({ person, links, now }: { person: PersonDetailApi; links: ContactLink[]; now: number }) {
+  const rows: ReactNode[] = [];
+  for (const l of links) {
+    if (l.kind === "sms" || l.kind === "whatsapp") continue; // phone appears once, as "Phone"
+    const label = l.kind === "call" ? "Phone" : l.label;
+    rows.push(
+      <DetailRow
+        key={l.kind}
+        label={label}
+        value={l.value}
+        icon={CONTACT_ICON[l.kind]}
+        href={l.href}
+        external={l.external}
+        menu={[
+          { label: `Copy ${label.toLowerCase()}`, icon: <Copy />, onSelect: () => void copy(l.value, label) },
+          { label: l.kind === "call" ? "Call" : l.kind === "email" ? "Send email" : "Open", icon: <ExternalLink />, onSelect: () => openLink(l) },
+        ]}
+      />,
+    );
+  }
+  if (person.birthday) {
+    const note = birthdayNote(String(person.birthday), now);
+    const text = formatBirthday(String(person.birthday));
+    rows.push(<DetailRow key="birthday" label="Birthday" value={text} note={note} icon={<Cake />} menu={[{ label: "Copy birthday", icon: <Copy />, onSelect: () => void copy(text, "Birthday") }]} />);
+  }
+  if (person.languages?.length) {
+    const text = person.languages.join(", ");
+    rows.push(<DetailRow key="languages" label="Languages" value={text} icon={<Languages />} menu={[{ label: "Copy", icon: <Copy />, onSelect: () => void copy(text, "Languages") }]} />);
+  }
+  if (person.interests?.length) {
+    const text = person.interests.join(", ");
+    rows.push(<DetailRow key="interests" label="Interests" value={text} icon={<Sparkles />} menu={[{ label: "Copy", icon: <Copy />, onSelect: () => void copy(text, "Interests") }]} />);
+  }
+  if (person.howICanHelp)
+    rows.push(<DetailRow key="help" label="How I can help them" value={person.howICanHelp} icon={<Users />} multiline menu={[{ label: "Copy", icon: <Copy />, onSelect: () => void copy(person.howICanHelp!, "Text") }]} />);
+  if (person.whatICanAsk)
+    rows.push(<DetailRow key="ask" label="What I can ask them" value={person.whatICanAsk} icon={<Briefcase />} multiline menu={[{ label: "Copy", icon: <Copy />, onSelect: () => void copy(person.whatICanAsk!, "Text") }]} />);
+  if (person.homeLocation)
+    rows.push(
+      <DetailRow
+        key="home"
+        label="Lives in"
+        value={[person.homeLocation.name, person.homeLocation.admin !== person.homeLocation.name ? person.homeLocation.admin : null, person.homeLocation.country].filter(Boolean).join(", ")}
+        icon={<MapPin />}
+        menu={[{ label: "Copy", icon: <Copy />, onSelect: () => void copy(person.homeLocation!.name, "City") }]}
+      />,
+    );
+  if (!rows.length) return null;
+  return <InsetGroup header="Details">{rows}</InsetGroup>;
+}
+
+function DetailRow({
+  label,
+  value,
+  note,
+  icon,
+  href,
+  external,
+  multiline,
+  menu,
+}: {
+  label: string;
+  value: string;
+  note?: string | null;
+  icon: ReactNode;
+  href?: string;
+  external?: boolean;
+  multiline?: boolean;
+  menu: MenuItem[];
+}) {
+  const body = (
+    <>
+      <span className="grid size-[30px] shrink-0 place-items-center text-fg-3 [&_svg]:size-[18px]" aria-hidden>
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1 py-2.5">
+        <span className="block text-footnote text-fg-3">{label}</span>
+        <span className={cn("block text-body select-text", href ? "text-accent-text" : "text-fg", multiline ? "whitespace-pre-wrap" : "truncate")}>{value}</span>
+        {note && <span className="mt-0.5 block text-footnote font-medium text-accent-text">{note}</span>}
+      </span>
+    </>
+  );
+  const cls =
+    "relative flex min-h-14 w-full items-center gap-3 px-4 text-left outline-none after:absolute after:right-0 after:bottom-0 after:left-[58px] after:h-[0.5px] after:bg-separator";
+  return (
+    <ContextMenu items={menu} title={label} className="block [&:last-child>*]:after:hidden">
+      {href ? (
+        <a
+          href={href}
+          target={external ? "_blank" : undefined}
+          rel={external ? "noopener noreferrer" : undefined}
+          className={cn(cls, "transition-colors duration-150 active:bg-fill-2 focus-visible:bg-fill-1 [@media(hover:hover)]:hover:bg-fill-1")}
+        >
+          {body}
+        </a>
+      ) : (
+        <div className={cls}>{body}</div>
+      )}
+    </ContextMenu>
   );
 }
