@@ -137,6 +137,8 @@ export type NoteUpsertData = z.output<typeof noteUpsert>;
 /* ------------------------------------------------------------------ */
 
 export const reminderInput = z.object({
+  /** Optional client-generated id (offline creation, undo of a delete). Re-sending the same id is idempotent. */
+  id: uuid.optional(),
   personId: uuid,
   /** The note this follow-up came from. */
   noteId: uuid.nullish(),
@@ -152,6 +154,19 @@ export const reminderAction = z.discriminatedUnion("action", [
   z.object({ action: z.literal("done") }),
   z.object({ action: z.literal("snooze"), days: z.number().int().min(1).max(365) }),
   z.object({ action: z.literal("reschedule"), dueAt: isoDateTime }),
+  /** Edit a follow-up in place. A new `dueAt` re-opens it (like reschedule). */
+  z.object({
+    action: z.literal("update"),
+    dueAt: isoDateTime.optional(),
+    message: z
+      .string()
+      .trim()
+      .max(2000)
+      .nullish()
+      .transform((v) => (v === undefined ? undefined : v ? v : null)),
+    recurrence: z.enum(RECURRENCE).optional(),
+    recurrenceDays: z.number().int().positive().max(3650).nullish(),
+  }),
 ]);
 export type ReminderAction = z.input<typeof reminderAction>;
 
