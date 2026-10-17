@@ -31,6 +31,17 @@ export const SOURCE_KIND = "apple-notes";
 export const FACTS_TITLE = "From Apple Notes — key facts";
 export const personSourceRef = (proposalId: string) => `import-person:${proposalId}`;
 export const factsSourceRef = (key: string) => `apple-notes:facts:${key}`;
+
+/**
+ * Where rows written by a commit say they came from. Apple Notes keeps its historical values; other
+ * sources (e.g. "paste" from the quick import) use the source name, and — because every paste makes
+ * fresh proposal keys — key their facts note by the target person, so repeated pastes about the same
+ * person extend one pinned note instead of stacking new ones.
+ */
+export function sourceMeta(source: string) {
+  if (source === SOURCE_KIND) return { kind: SOURCE_KIND, factsTitle: FACTS_TITLE, factsRef: (key: string, _personId: string) => factsSourceRef(key) };
+  return { kind: source, factsTitle: "Key facts", factsRef: (_key: string, personId: string) => `${source}:facts:${personId}` };
+}
 export const excerptSourceRef = (externalId: string, key: string) => `${externalId}#${key}`;
 
 const DAY = 86_400_000;
@@ -103,6 +114,7 @@ type Ctx = {
   itemDates: Map<string, { date: Date; title: string | null }>;
   plans: Map<string, PersonPlan>;
   warnings: string[];
+  meta: ReturnType<typeof sourceMeta>;
 };
 
 async function tableExists(tx: Tx, name: string) {
@@ -238,7 +250,7 @@ async function commitPerson(tx: Tx, ctx: Ctx, log: CommitLog, p: ImportPerson): 
         howICanHelp: prof.howICanHelp,
         whatICanAsk: prof.whatICanAsk,
         ...links,
-        sourceKind: SOURCE_KIND,
+        sourceKind: ctx.meta.kind,
         sourceRef: personSourceRef(locked.id),
       })
       .returning({ id: people.id });
@@ -310,11 +322,11 @@ async function commitPerson(tx: Tx, ctx: Ctx, log: CommitLog, p: ImportPerson): 
   const plan = ctx.plans.get(locked.key) ?? { reminder: null, openThreads: [] };
   const md = factsMarkdown(prof.keyFacts, plan.openThreads, { howICanHelp: prof.howICanHelp, whatICanAsk: prof.whatICanAsk });
   if (md) {
-    const ref = factsSourceRef(locked.key);
+    const ref = ctx.meta.factsRef(locked.key, personId);
     const [existing] = await tx
       .select({ id: notes.id, contentMd: notes.contentMd })
       .from(notes)
-      .where(and(eq(notes.ownerId, ctx.ownerId), eq(notes.sourceKind, SOURCE_KIND), eq(notes.sourceRef, ref), isNull(notes.deletedAt)));
+      .where(and(eq(notes.ownerId, ctx.ownerId), eq(notes.sourceKind, ctx.meta.kind), eq(notes.sourceRef, ref), isNull(notes.deletedAt)));
     if (existing) {
       const merged = mergeFactsMd(existing.contentMd, md);
       if (merged !== existing.contentMd) await loggedUpdate(tx, log, "notes", existing.id, { contentMd: merged, contentText: mdToText(merged) }, lc);
@@ -322,7 +334,7 @@ async function commitPerson(tx: Tx, ctx: Ctx, log: CommitLog, p: ImportPerson): 
       const first = fromIsoDay(prof.firstSeen) ?? fromIsoDay(prof.lastSeen) ?? ctx.now;
       const [n] = await tx
         .insert(notes)
-        .values({ ownerId: ctx.ownerId, personId, title: FACTS_TITLE, contentMd: md, contentText: mdToText(md), kind: "note", occurredAt: first, pinned: true, sourceKind: SOURCE_KIND, sourceRef: ref })
+        .values({ ownerId: ctx.ownerId, personId, title: ctx.meta.factsTitle, contentMd: md, contentText: mdToText(md), kind: "note", occurredAt: first, pinned: true, sourceKind: ctx.meta.kind, sourceRef: ref })
         .returning({ id: notes.id });
       await log.insert("notes", { id: n!.id }, lc);
     }
@@ -333,11 +345,11 @@ async function commitPerson(tx: Tx, ctx: Ctx, log: CommitLog, p: ImportPerson): 
     const [have] = await tx
       .select({ id: remindersX.id })
       .from(remindersX)
-      .where(and(eq(remindersX.ownerId, ctx.ownerId), eq(remindersX.sourceKind, SOURCE_KIND), eq(remindersX.sourceRef, locked.key)));
+      .where(and(eq(remindersX.ownerId, ctx.ownerId), eq(remindersX.sourceKind, ctx.meta.kind), eq(remindersX.sourceRef, locked.key)));
     if (!have) {
       const [r] = await tx
         .insert(remindersX)
-        .values({ ownerId: ctx.ownerId, personId, dueAt: plan.reminder.dueAt, message: plan.reminder.message, recurrence: "none", sourceKind: SOURCE_KIND, sourceRef: locked.key })
+        .values({ ownerId: ctx.ownerId, personId, dueAt: plan.reminder.dueAt, message: plan.reminder.message, recurrence: "none", sourceKind: ctx.meta.kind, sourceRef: locked.key })
         .returning({ id: remindersX.id });
       await log.insert("reminders", { id: r!.id }, lc);
       await syncNextFollowup(tx, personId);
@@ -407,7 +419,7 @@ async function commitNote(tx: Tx, ctx: Ctx, log: CommitLog, it: NoteItem, props:
       const r = await tx
         .select({ id: notes.id })
         .from(notes)
-        .where(and(eq(notes.ownerId, ctx.ownerId), eq(notes.sourceKind, SOURCE_KIND), eq(notes.sourceRef, it.externalId), isNull(notes.deletedAt)));
+        .where(and(eq(notes.ownerId, ctx.ownerId), eq(notes.sourceKind, ctx.meta.kind), eq(notes.sourceRef, it.externalId), isNull(notes.deletedAt)));
       noteId = r[0]?.id ?? null;
     }
     if (noteId) {
@@ -425,7 +437,7 @@ async function commitNote(tx: Tx, ctx: Ctx, log: CommitLog, it: NoteItem, props:
           ...content,
           kind: it.classification === "meeting" ? "meeting" : "note",
           pinned: false,
-          sourceKind: SOURCE_KIND,
+          sourceKind: ctx.meta.kind,
           sourceRef: it.externalId,
         })
         .onConflictDoNothing()
@@ -473,14 +485,14 @@ async function commitNote(tx: Tx, ctx: Ctx, log: CommitLog, it: NoteItem, props:
       const [have] = await tx
         .select({ id: notes.id, contentText: notes.contentText })
         .from(notes)
-        .where(and(eq(notes.ownerId, ctx.ownerId), eq(notes.sourceKind, SOURCE_KIND), eq(notes.sourceRef, ref), isNull(notes.deletedAt)));
+        .where(and(eq(notes.ownerId, ctx.ownerId), eq(notes.sourceKind, ctx.meta.kind), eq(notes.sourceRef, ref), isNull(notes.deletedAt)));
       if (have) {
         if (have.contentText !== excerpt) await loggedUpdate(tx, log, "notes", have.id, { contentMd: excerpt, contentText: excerpt, occurredAt: nd }, lc);
         continue;
       }
       const [n] = await tx
         .insert(notes)
-        .values({ ownerId: ctx.ownerId, personId: pid, title: `${it.title ?? "Note"} (excerpt)`, contentMd: excerpt, contentText: excerpt, kind: "note", occurredAt: nd, pinned: false, sourceKind: SOURCE_KIND, sourceRef: ref })
+        .values({ ownerId: ctx.ownerId, personId: pid, title: `${it.title ?? "Note"} (excerpt)`, contentMd: excerpt, contentText: excerpt, kind: "note", occurredAt: nd, pinned: false, sourceKind: ctx.meta.kind, sourceRef: ref })
         .returning({ id: notes.id });
       await log.insert("notes", { id: n!.id }, lc);
       res.excerpts++;
@@ -509,7 +521,15 @@ export type CommitReport = {
   warnings: string[];
 };
 
-export async function commitImport(db: DbOrTx, ownerId: string, opts: { source: string; dryRun: boolean; limit?: number; keys?: string[]; now?: Date; commitId?: string }): Promise<CommitReport> {
+/**
+ * `keys` limits phase 1 to those proposals; `itemIds` limits phase 2 to those notes (the quick
+ * import commits one pasted note without re-walking every earlier paste).
+ */
+export async function commitImport(
+  db: DbOrTx,
+  ownerId: string,
+  opts: { source: string; dryRun: boolean; limit?: number; keys?: string[]; itemIds?: string[]; now?: Date; commitId?: string },
+): Promise<CommitReport> {
   const commitId = opts.commitId ?? randomUUID();
   const now = opts.now ?? new Date();
   return inTransaction(db, !opts.dryRun, async (outer) => {
@@ -541,7 +561,15 @@ export async function commitImport(db: DbOrTx, ownerId: string, opts: { source: 
         extractionVersion: importItemsX.extractionVersion,
       })
       .from(importItemsX)
-      .where(and(eq(importItemsX.ownerId, ownerId), eq(importItemsX.source, opts.source), isNull(importItemsX.goneAt), inArray(importItemsX.status, ["extracted", "committed"])))) as NoteItem[];
+      .where(
+        and(
+          eq(importItemsX.ownerId, ownerId),
+          eq(importItemsX.source, opts.source),
+          isNull(importItemsX.goneAt),
+          inArray(importItemsX.status, ["extracted", "committed"]),
+          opts.itemIds ? inArray(importItemsX.id, opts.itemIds.length ? opts.itemIds : ["00000000-0000-0000-0000-000000000000"]) : undefined,
+        ),
+      )) as NoteItem[];
     const itemDates = new Map(
       items.map((it) => {
         const ex = normalizeExtraction(it.candidates, it.extractionVersion);
@@ -585,6 +613,7 @@ export async function commitImport(db: DbOrTx, ownerId: string, opts: { source: 
       itemDates,
       plans,
       warnings: report.warnings,
+      meta: sourceMeta(opts.source),
     };
     if (!ctx.hasActivities) report.warnings.push("activities/person_activities tables not found — activities stored as legacy hobbies where they match");
 
