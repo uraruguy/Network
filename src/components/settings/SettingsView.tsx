@@ -18,6 +18,7 @@ import { keys } from "@/lib/queries/keys";
 import type { LocationInput } from "@/lib/schemas";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
+import { PALETTE_HEX } from "@/lib/constants/palette";
 import { useQueryClient } from "@tanstack/react-query";
 
 export function SettingsView() {
@@ -137,7 +138,8 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
   );
 }
 
-const PALETTE = ["#7c5cff", "#ff6b6b", "#0fb5ba", "#f4b942", "#3b82f6", "#12a594", "#9aa9ab", "#ec4899", "#f97316", "#84cc16"];
+// Muted design-system palette (stored as #rrggbb; see src/lib/constants/palette.ts).
+const PALETTE = PALETTE_HEX;
 
 function CategoriesCard({ cats }: { cats: { id: string; name: string; color: string; icon: string; sort: number }[] }) {
   const qc = useQueryClient();
