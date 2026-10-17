@@ -217,7 +217,7 @@ export function genderHint(text: string, surfaceIndex: number): "m" | "f" | null
     else if (MASC.has(w)) m++;
     else if (i > 0 && AUX.has(words[i - 1]!) && w.length >= 4) {
       if (/la$/.test(w)) f += 0.5;
-      else if (/(il|al|el|ou|iu)$/.test(w)) m += 0.5;
+      else if (/(il|al|ou|iu)$/.test(w)) m += 0.5;
     }
   }
   if (m === f) return null;

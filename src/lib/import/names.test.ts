@@ -78,6 +78,9 @@ describe("genderHint", () => {
     expect(at("Jani je bil tam.", "Jani")).toBe("m");
     expect(at("Jani je bila tam.", "Jani")).toBe("f");
   });
+  it("ignores nouns after the auxiliary", () => {
+    expect(at("Jana Kos je angel investitorka, vlaga v SaaS.", "Jana")).toBeNull();
+  });
   it("returns null without a signal", () => {
     expect(at("Srečal Petra na kavi.", "Petra")).toBeNull();
   });
