@@ -12,7 +12,7 @@ export const GET = withOwner(async ({ ownerId, url }) => {
     headers: {
       "content-type": "text/html; charset=utf-8",
       // Rendered in a new tab: no scripts, no framing by other sites.
-      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; frame-ancestors 'self'",
+      "content-security-policy": "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; frame-ancestors 'self'",
     },
   });
 });

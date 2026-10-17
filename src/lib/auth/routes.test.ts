@@ -53,7 +53,7 @@ describe("classify", () => {
     expect(classify("/api/csp-reportx")).toBe("api");
     expect(classify("/api/security")).toBe("api");
     expect(classify("/api/security/passkeys/abc")).toBe("api");
-    expect(classify("/api/digest/preview")).toBe("api");
+    expect(classify("/api/settings/digest/preview")).toBe("api");
     expect(classify("/api/cronjob")).toBe("api");
     expect(classify("/api/mcpx")).toBe("api");
     expect(classify("/api")).toBe("api");

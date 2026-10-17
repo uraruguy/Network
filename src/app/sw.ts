@@ -53,6 +53,14 @@ const runtimeCaching: RuntimeCaching[] = [
       plugins: [new CacheableResponsePlugin({ statuses: [200] }), new ExpirationPlugin({ maxEntries: 20, maxAgeSeconds: 30 * DAY })],
     }),
   },
+  {
+    // MapLibre's worker is emitted as a hashed .mjs asset outside the precache manifest.
+    matcher: ({ url, sameOrigin }) => sameOrigin && /^\/_next\/static\/media\/maplibre-gl-worker\..+\.mjs$/.test(url.pathname),
+    handler: new CacheFirst({
+      cacheName: "map-worker",
+      plugins: [new CacheableResponsePlugin({ statuses: [200] }), new ExpirationPlugin({ maxEntries: 4 })],
+    }),
+  },
   ...defaultCache,
 ];
 

@@ -8,7 +8,7 @@ export const maxDuration = 60;
 /**
  * Daily digest trigger. Callers: Vercel Cron and Supabase pg_cron (`private.ping_digest`), both
  * sending `Authorization: Bearer <CRON_SECRET>`. Secrets in query strings are not accepted (they
- * end up in logs and browser history); the preview lives at /api/digest/preview for the owner.
+ * end up in logs and browser history); the preview lives at /api/settings/digest/preview for the owner.
  */
 function authorized(req: Request) {
   const secret = serverEnv().CRON_SECRET;

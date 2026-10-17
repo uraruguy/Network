@@ -19,10 +19,12 @@ const server = z.object({
   AI_PROVIDER: z.enum(["agent-sdk", "anthropic", "openrouter"]).optional(),
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
   OPENROUTER_API_KEY: z.string().min(1).optional(),
-  OPENROUTER_MODEL: z.string().default("anthropic/claude-opus-5"),
+  OPENROUTER_MODEL: z.string().default("anthropic/claude-sonnet-5.5"),
   AI_MODEL_MAIN: z.string().min(1).optional(),
   AI_MODEL_FAST: z.string().min(1).optional(),
   RESEND_API_KEY: z.string().min(1).optional(),
+  /** SMTP transport instead of Resend, e.g. smtps://user:pass@smtp.example.com:465 (overrides RESEND_API_KEY). */
+  SMTP_URL: z.string().url().optional(),
   EMAIL_FROM: z.string().default("The Network <onboarding@resend.dev>"),
   CRON_SECRET: z.string().min(16).optional(),
   INBOX_TOKEN: z.string().min(16).optional(),
