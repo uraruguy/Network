@@ -3,6 +3,7 @@ import { dateTimeFormat } from "@/lib/format";
 import { getPerson, searchPeople, type IndexLocation, type PersonIndexRow } from "@/lib/data/people";
 import { listTaxonomy } from "@/lib/data/tags";
 import { normalizeForSearch } from "@/components/ui/search";
+import { nameKey } from "@/lib/text";
 import { ToolError, type ToolCtx } from "./registry";
 
 /**
@@ -87,16 +88,16 @@ export function names(ctx: ToolCtx): Promise<Names> {
 }
 
 /**
- * Resolves names or ids to ids (case- and accent-insensitive). Unknown values throw a ToolError
+ * Resolves names or ids to ids (case-, accent- and emoji-insensitive). Unknown values throw a ToolError
  * listing what exists, so the model can retry with a real value instead of returning nothing.
  */
 export function idsFor(values: readonly string[] | undefined, map: Map<string, string>, kind: string): string[] | undefined {
   if (!values?.length) return undefined;
-  const byName = new Map([...map].map(([id, name]) => [normalizeForSearch(name), id]));
+  const byName = new Map([...map].map(([id, name]) => [nameKey(name), id]));
   const ids: string[] = [];
   const unknown: string[] = [];
   for (const v of values) {
-    const id = map.has(v) ? v : byName.get(normalizeForSearch(v));
+    const id = map.has(v) ? v : byName.get(nameKey(v));
     if (id) ids.push(id);
     else unknown.push(v);
   }

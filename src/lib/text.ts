@@ -6,6 +6,16 @@ export function fold(s: string): string {
 }
 
 /**
+ * Lookup key for a taxonomy name (activities, tags): case- and accent-insensitive and blind to
+ * emoji, so "🥾 Hiking" (how the model sees an activity) finds "Hiking". Emoji-only names keep
+ * their emoji so they can't all collapse to the same empty key.
+ */
+export function nameKey(s: string): string {
+  const letters = s.replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}\u{20E3}]/gu, "").replace(/\s+/g, " ").trim();
+  return fold(letters || s.trim());
+}
+
+/**
  * URL-safe slug, accent-insensitive. Same result as the SQL helper `private.slugify()` for Latin
  * text ("Cross-country skiing" → "cross-country-skiing", "Čaj s prijatelji" → "caj-s-prijatelji").
  */
