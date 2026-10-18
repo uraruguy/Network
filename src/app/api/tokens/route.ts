@@ -17,7 +17,7 @@ import { scopesFor } from "@/lib/mcp/tokens";
 export const GET = withOwner(async ({ ownerId }) => {
   const [tokens, grants] = await Promise.all([listTokens(ownerId), listGrants(ownerId)]);
   return { mcpUrl: mcpResourceUrl(), tokens, grants };
-});
+}, { fresh: true });
 
 const createInput = z.object({
   name: z.string().trim().min(1).max(60),
@@ -34,4 +34,4 @@ export const POST = withOwner(async ({ ownerId, req }) => {
     if (err instanceof TooManyTokensError) throw new HttpError(409, err.message);
     throw err;
   }
-});
+}, { fresh: true });

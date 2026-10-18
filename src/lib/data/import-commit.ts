@@ -27,6 +27,7 @@ import { introductionLinks } from "@/lib/import/introductions";
 import { openThreadsMarkdown, planReminders, SPREAD_DAYS, type OpenThread, type PersonPlan } from "@/lib/import/reminders-policy";
 import { rollbackBlockers, type BlockerRef } from "@/lib/import/rollback-guard";
 import { finalProposalResolver } from "./import-resolve";
+import { eachLimit } from "@/lib/each-limit";
 import { ImportError, inTransaction, type DbOrTx, type Tx } from "./import-shared";
 
 const { people, notes, noteMentions, personCategories, categories, tags, personTags, locations } = schema;
@@ -694,6 +695,13 @@ async function commitNote(tx: Tx, ctx: Ctx, log: CommitLog, it: NoteItem, props:
 /*  Orchestration                                                      */
 /* ------------------------------------------------------------------ */
 
+/** Drizzle wraps driver errors as "Failed query: <sql> params: …"; the Postgres reason is the cause. */
+function failure(e: unknown): string {
+  const err = e as Error & { cause?: { message?: string; code?: string; detail?: string } };
+  const c = err.cause;
+  return c?.message ? [c.message, c.code && `(${c.code})`, c.detail].filter(Boolean).join(" ") : err.message;
+}
+
 export type CommitReport = {
   commitId: string;
   dryRun: boolean;
@@ -714,11 +722,31 @@ export type CommitReport = {
 export async function commitImport(
   db: DbOrTx,
   ownerId: string,
-  opts: { source: string; dryRun: boolean; limit?: number; keys?: string[]; itemIds?: string[]; now?: Date; commitId?: string },
+  opts: {
+    source: string;
+    dryRun: boolean;
+    limit?: number;
+    keys?: string[];
+    itemIds?: string[];
+    now?: Date;
+    commitId?: string;
+    /**
+     * false (writes only): no outer transaction — every person and note commits on its own, so a
+     * dropped connection loses one row's work and a re-run resumes (committed proposals and filed
+     * notes are skipped). For long CLI runs through a pooler that recycles connections.
+     */
+    atomic?: boolean;
+    /** Parallel workers for the per-person / per-note loops (each in its own transaction). */
+    concurrency?: number;
+    onProgress?: (phase: "people" | "notes", done: number, total: number) => void;
+  },
 ): Promise<CommitReport> {
   const commitId = opts.commitId ?? randomUUID();
   const now = opts.now ?? new Date();
-  return inTransaction(db, !opts.dryRun, async (outer) => {
+  // A dry run always needs the outer transaction: it is what rolls everything back.
+  const atomic = opts.dryRun || opts.atomic !== false;
+  const run = (body: (outer: Tx) => Promise<CommitReport>) => (atomic ? inTransaction(db, !opts.dryRun, body) : body(db as Tx));
+  return run(async (outer) => {
     const report: CommitReport = {
       commitId,
       dryRun: opts.dryRun,
@@ -810,7 +838,8 @@ export async function commitImport(
     if (!ctx.hasActivities) report.warnings.push("activities/person_activities tables not found — activities stored as legacy hobbies where they match");
 
     // Phase 1
-    for (const p of toCommit) {
+    const workers = atomic ? 1 : Math.max(1, opts.concurrency ?? 1);
+    await eachLimit(toCommit, workers, async (p) => {
       try {
         let child: CommitLog | null = null;
         const r = await outer.transaction(async (tx) => commitPerson(tx, ctx, (child = log.with(tx)), p));
@@ -822,9 +851,9 @@ export async function commitImport(
           if (r.reminder) report.reminders++;
         }
       } catch (e) {
-        report.people.failed.push({ key: p.key, error: (e as Error).message });
+        report.people.failed.push({ key: p.key, error: failure(e) });
       }
-    }
+    }, (done) => opts.onProgress?.("people", done, toCommit.length));
 
     // Phase 2
     props = await outer.select().from(importPeople).where(and(eq(importPeople.ownerId, ownerId), eq(importPeople.source, opts.source)));
@@ -836,7 +865,8 @@ export async function commitImport(
           .where(and(eq(importMentions.ownerId, ownerId), inArray(importMentions.role, ["primary", "listed", "excerpt"])))
       ).map((r) => r.itemId),
     );
-    for (const it of items.filter((i) => filed.has(i.id))) {
+    const toFile = items.filter((i) => filed.has(i.id));
+    await eachLimit(toFile, workers, async (it) => {
       try {
         let child: CommitLog | null = null;
         const r = await outer.transaction(async (tx) => commitNote(tx, ctx, (child = log.with(tx)), it, props));
@@ -851,9 +881,9 @@ export async function commitImport(
         report.notes.deleted += r.deleted;
         report.notes.edited += r.edited;
       } catch (e) {
-        report.notes.failed.push({ itemId: it.id, title: it.title, error: (e as Error).message });
+        report.notes.failed.push({ itemId: it.id, title: it.title, error: failure(e) });
       }
-    }
+    }, (done) => opts.onProgress?.("notes", done, toFile.length));
 
     // Phase 3: introducedBy among all committed people (fill blank only).
     report.introductions = await linkIntroductions(outer, ctx, log, props);

@@ -1,8 +1,10 @@
 /**
  * Commits approved people and their notes into The Network.
- *   pnpm tsx scripts/import/commit.ts --run <id> [--limit N] [--keys a,b] [--write]
+ *   pnpm tsx scripts/import/commit.ts --run <id> [--limit N] [--keys a,b] [--write] [--atomic] [--concurrency 4]
  * Without --write (or with --dry-run) everything runs in one transaction that is rolled back,
- * and the counts are printed. Every write is logged in import_commit_log (see rollback.ts).
+ * and the counts are printed. With --write each person and note commits on its own (resumable:
+ * re-run after a dropped connection and it continues); --atomic makes it one transaction instead.
+ * Every write is logged in import_commit_log (see rollback.ts).
  */
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -15,8 +17,21 @@ run(async () => {
   const { commitImport } = await import("@/lib/data/import-commit");
   const limit = ctx.args.opt("--limit");
   const keys = ctx.args.opts("--keys");
+  const atomic = !ctx.write || ctx.args.flag("--atomic");
+  const concurrency = atomic ? 1 : Number(ctx.args.opt("--concurrency") ?? 4);
+  if (ctx.write) console.log(`· ${atomic ? "atomic (one transaction)" : `resumable (per person / note, ${concurrency} at a time)`}`);
   const t0 = Date.now();
-  const r = await commitImport(db, owner.id, { source: ctx.source, dryRun: !ctx.write, limit: limit ? Number(limit) : undefined, keys: keys.length ? keys : undefined });
+  const r = await commitImport(db, owner.id, {
+    source: ctx.source,
+    dryRun: !ctx.write,
+    limit: limit ? Number(limit) : undefined,
+    keys: keys.length ? keys : undefined,
+    atomic,
+    concurrency,
+    onProgress: (phase, done, total) => {
+      if (done % 10 === 0 || done === total) console.log(`  ${phase} ${done}/${total} · ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+    },
+  });
   console.log(`commit ${r.commitId}${r.dryRun ? " (DRY RUN — rolled back)" : ""} in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
   console.log(`people:  created ${r.people.created} · updated ${r.people.updated} · unchanged ${r.people.unchanged} · failed ${r.people.failed.length}`);
   console.log(`notes:   created ${r.notes.created} · updated ${r.notes.updated} · unchanged ${r.notes.unchanged} · excerpts ${r.notes.excerpts} · mention links ${r.notes.mentions} · waiting on review ${r.notes.waiting} · partially linked (people still in review) ${r.notes.partial} · failed ${r.notes.failed.length}`);

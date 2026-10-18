@@ -1,14 +1,28 @@
+import { isValidTimeZone, safeTimeZone } from "@/lib/time/zoned";
+
 /**
  * Wall-clock ⇄ instant conversion in an IANA time zone, without a date library. Pure; tested.
- * Follow-ups land at 09:00 local time, like the rest of the app.
+ * Follow-ups land at 09:00 local time, like the rest of the app. A zone that Intl doesn't know
+ * (a bad profile value) falls back to UTC instead of throwing a RangeError mid-tool-call.
  */
 
 const DEFAULT_HOUR = 9;
 
+/** IANA-style names ("Europe/Ljubljana", "America/Port-au-Prince", "Etc/GMT+5", "UTC"); no raw offsets. */
+const IANA_NAME = /^[A-Za-z][A-Za-z0-9_-]*(?:\/[A-Za-z0-9_+-]+)*$/;
+
+/**
+ * True for a zone both Intl and Postgres understand the same way. Offsets like "+01:00" are
+ * refused even though Intl accepts them: Postgres reads them with the POSIX sign (inverted).
+ */
+export function isIanaTimeZone(value: string): boolean {
+  return value.length <= 64 && IANA_NAME.test(value) && isValidTimeZone(value);
+}
+
 /** Offset (minutes east of UTC) of `timeZone` at instant `at`. */
 export function zoneOffsetMinutes(at: Date, timeZone: string): number {
   const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
+    timeZone: safeTimeZone(timeZone),
     hourCycle: "h23",
     year: "numeric",
     month: "2-digit",
@@ -33,7 +47,7 @@ export function zonedToUtc(y: number, m: number, d: number, h: number, min: numb
 
 /** Today's calendar date in `timeZone` as [year, month, day]. */
 export function todayIn(timeZone: string, now = new Date()): [number, number, number] {
-  const s = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+  const s = new Intl.DateTimeFormat("en-CA", { timeZone: safeTimeZone(timeZone), year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
   const [y, m, d] = s.split("-").map(Number);
   return [y!, m!, d!];
 }

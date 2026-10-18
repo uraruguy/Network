@@ -4,7 +4,57 @@ import { useState, useTransition, type ReactNode } from "react";
 import { GlassButton } from "@/components/glass/GlassButton";
 import { cn } from "@/lib/utils";
 import type { Access } from "@/lib/mcp/tokens";
-import { approveConsent, denyConsent, type ConsentResult } from "./actions";
+import { approveConsent, denyConsent, reconnectConsent, type ConsentResult } from "./actions";
+
+function ErrorNote({ message }: { message: string | null }) {
+  if (!message) return null;
+  return (
+    <p role="alert" className="rounded-md bg-danger-soft px-4 py-3 text-subhead text-danger">
+      {message}
+    </p>
+  );
+}
+
+/** One server action → navigate to its redirect URL, or show its message. */
+function useConsentAction(run: () => Promise<ConsentResult>) {
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const go = () => {
+    setError(null);
+    start(async () => {
+      const result = await run();
+      if (result.ok) window.location.assign(result.redirectUrl);
+      else setError(result.message);
+    });
+  };
+  return { pending, error, go };
+}
+
+/** Continue to an app approved earlier (Supabase already issued its code). */
+export function ReconnectForm({ redirectUrl }: { redirectUrl: string }) {
+  const { pending, error, go } = useConsentAction(() => reconnectConsent(redirectUrl));
+  return (
+    <div className="space-y-3">
+      <ErrorNote message={error} />
+      <GlassButton variant="primary" className="w-full" loading={pending} onClick={go}>
+        Continue
+      </GlassButton>
+    </div>
+  );
+}
+
+/** Declines a request the page won't approve, so the waiting app hears back at once. */
+export function CancelConsent({ authorizationId }: { authorizationId: string }) {
+  const { pending, error, go } = useConsentAction(() => denyConsent(authorizationId));
+  return (
+    <div className="space-y-3">
+      <ErrorNote message={error} />
+      <GlassButton variant="surface" className="w-full" loading={pending} onClick={go}>
+        Cancel connection
+      </GlassButton>
+    </div>
+  );
+}
 
 const OPTIONS: { value: Access; title: string; description: string; icon: ReactNode }[] = [
   { value: "read", title: "Read only", description: "Search people and read notes and follow-ups.", icon: <Eye /> },
@@ -69,11 +119,7 @@ export function ConsentForm({ authorizationId, clientName }: { authorizationId: 
         </div>
       </fieldset>
 
-      {error && (
-        <p role="alert" className="rounded-md bg-danger-soft px-4 py-3 text-subhead text-danger">
-          {error}
-        </p>
-      )}
+      <ErrorNote message={error} />
 
       <div className="flex flex-col-reverse gap-2 sm:flex-row">
         <GlassButton variant="surface" className="flex-1" disabled={pending} loading={pending && decision === "deny"} onClick={() => decide("deny")}>

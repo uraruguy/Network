@@ -2,11 +2,14 @@ import "server-only";
 import { createClient } from "@supabase/supabase-js";
 import type { AuthInfo } from "@modelcontextprotocol/server";
 import { after } from "next/server";
-import { verifyBearer } from "@/lib/auth/claims";
+import { parseClaims, type SessionClaims } from "@/lib/auth/claims";
 import { findTokenRecord, touchToken } from "@/lib/data/api-tokens";
 import { findGrantRecord, touchGrant } from "@/lib/data/oauth-grants";
 import { clientEnv } from "@/lib/env";
+import { safeTimeZone } from "@/lib/time/zoned";
 import { ToolError, type Scope, type ToolCtx } from "@/lib/ai/tools/registry";
+import { approvalEvidence } from "./approval-log";
+import { isApprovedSession, oauthSessionStart } from "./approvals";
 import { looksLikePat, normalizeScopes, PAT_PATTERN } from "./tokens";
 
 /**
@@ -17,7 +20,9 @@ import { looksLikePat, normalizeScopes, PAT_PATTERN } from "./tokens";
  *  2. OAuth access token issued by Supabase Auth to an MCP client: JWT verified locally
  *     (`getClaims`), must carry a `client_id`, and the owner (`sub`) must have an un-revoked
  *     `oauth_client_grants` row for that client; scopes come from the grant (the access the owner
- *     chose on the consent page), not from the token.
+ *     chose on the consent page), not from the token. The token's session must also have been
+ *     created right after a passkey-verified approval (approvals.ts): Supabase itself would mint
+ *     tokens for an approved client from a password-only session.
  *
  * Unknown/invalid tokens return `undefined`, which `withMcpAuth({ required: true })` turns into a
  * 401 with an RFC 9728 `WWW-Authenticate` challenge.
@@ -39,11 +44,15 @@ export const GRANT_CACHE_MS = 30_000;
 const TOUCH_INTERVAL_MS = 5 * 60_000;
 
 const grantCache = new Map<string, { at: number; grant: Awaited<ReturnType<typeof findGrantRecord>> }>();
+/** Approval verdicts per OAuth session (`owner:client:session`). */
+const sessionCache = new Map<string, { at: number; approved: boolean }>();
 const lastTouch = new Map<string, number>();
 
-/** Forget a cached grant (call after revoking it in this process). */
+/** Forget a cached grant and its session verdicts (call after approving or revoking it in this process). */
 export function forgetGrant(ownerId: string, clientId: string) {
-  grantCache.delete(`${ownerId}:${clientId}`);
+  const key = `${ownerId}:${clientId}`;
+  grantCache.delete(key);
+  for (const k of sessionCache.keys()) if (k.startsWith(`${key}:`)) sessionCache.delete(k);
 }
 
 /** Runs bookkeeping after the response; falls back to fire-and-forget outside a request (tests, scripts). */
@@ -82,7 +91,7 @@ async function verifyPat(token: string): Promise<AuthInfo | undefined> {
     kind: "pat",
     credential: `pat:${row.id}`,
     client: row.name,
-    timezone: row.timezone ?? "UTC",
+    timezone: safeTimeZone(row.timezone),
   });
 }
 
@@ -95,6 +104,22 @@ function jwtVerifier() {
   return verifier;
 }
 
+type OAuthClaims = SessionClaims & { clientId: string; sessionStart: Date | null };
+
+/** Verified OAuth-client claims plus the session's creation time (from `amr`), or null. */
+async function verifyOAuthJwt(token: string): Promise<OAuthClaims | null> {
+  try {
+    const { data, error } = await jwtVerifier().auth.getClaims(token);
+    if (error || !data) return null;
+    const claims = parseClaims(data.claims, { allowOAuthClient: true });
+    // Only tokens issued to an OAuth client: a browser session JWT must never work here.
+    if (!claims?.clientId) return null;
+    return { ...claims, clientId: claims.clientId, sessionStart: oauthSessionStart((data.claims as { amr?: unknown }).amr) };
+  } catch {
+    return null;
+  }
+}
+
 async function cachedGrant(ownerId: string, clientId: string) {
   const key = `${ownerId}:${clientId}`;
   const hit = grantCache.get(key);
@@ -104,21 +129,33 @@ async function cachedGrant(ownerId: string, clientId: string) {
   return grant;
 }
 
+/** Was this OAuth session minted right after a passkey-verified approval? Fails closed without `amr`. */
+async function cachedApproval({ sub, clientId, sessionId, sessionStart }: OAuthClaims) {
+  if (!sessionStart) return false;
+  const key = `${sub}:${clientId}:${sessionId}`;
+  const hit = sessionCache.get(key);
+  if (hit && Date.now() - hit.at < GRANT_CACHE_MS) return hit.approved;
+  const approved = isApprovedSession(await approvalEvidence(sub, clientId, sessionStart));
+  if (!approved) console.warn("[mcp] refused an OAuth session without a passkey-verified approval", { clientId, sessionStart: sessionStart.toISOString() });
+  sessionCache.set(key, { at: Date.now(), approved });
+  return approved;
+}
+
 async function verifyOAuth(token: string): Promise<AuthInfo | undefined> {
-  const claims = await verifyBearer(jwtVerifier(), token);
-  // Only tokens issued to an OAuth client: a browser session JWT must never work here.
-  if (!claims?.clientId) return undefined;
+  const claims = await verifyOAuthJwt(token);
+  if (!claims) return undefined;
   const grant = await cachedGrant(claims.sub, claims.clientId);
   if (!grant || grant.revokedAt) return undefined;
   const scopes = normalizeScopes(grant.scopes);
   if (!scopes.length) return undefined;
-  touchThrottled(`oauth:${claims.sub}:${claims.clientId}`, null, () => touchGrant(claims.sub, claims.clientId!));
+  if (!(await cachedApproval(claims))) return undefined;
+  touchThrottled(`oauth:${claims.sub}:${claims.clientId}`, null, () => touchGrant(claims.sub, claims.clientId));
   return authInfo(token, claims.clientId, scopes, {
     ownerId: claims.sub,
     kind: "oauth",
     credential: `oauth:${claims.clientId}`,
     client: grant.clientName ?? "OAuth app",
-    timezone: grant.timezone ?? "UTC",
+    timezone: safeTimeZone(grant.timezone),
   });
 }
 

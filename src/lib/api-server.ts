@@ -3,13 +3,14 @@ import { NextResponse } from "next/server";
 import { z, type ZodType } from "zod";
 import { getOwner, type Owner } from "@/lib/auth/server";
 import { HttpError } from "@/lib/errors";
+import { supabaseServer } from "@/lib/supabase/server";
 
 /**
  * Route-handler plumbing: authentication, parameter/body validation and one JSON error shape.
  *
  *   Error body: { error: <machine code>, message: <human text> }
  *   Codes: unauthenticated · mfa_required · forbidden · not_found · gone · conflict · invalid ·
- *          bad_request · rate_limited · internal
+ *          bad_request · rate_limited · unavailable · internal
  */
 
 export { HttpError };
@@ -45,20 +46,58 @@ function validateParams<T>(raw: Record<string, string>, schema?: ZodType<T>): T 
 
 export type OwnerContext<TParams> = { ownerId: string; owner: Owner; req: Request; params: TParams; url: URL };
 
+export type SessionVerdict = "alive" | "ended" | "unavailable";
+
+/**
+ * Reads the Auth server's answer about the session (`auth.getUser()`). Pure. Network failures,
+ * rate limits and 5xx are "unavailable" (retry later); any other error — `session_not_found` after
+ * "sign out other devices" or a password change, a revoked refresh token, no session at all —
+ * means it ended.
+ */
+export function sessionVerdict(ownerId: string, userId: string | null | undefined, error: { name?: string; status?: number } | null): SessionVerdict {
+  if (error) {
+    const status = error.status ?? 0;
+    return error.name === "AuthRetryableFetchError" || status === 0 || status === 429 || status >= 500 ? "unavailable" : "ended";
+  }
+  return userId === ownerId ? "alive" : "ended";
+}
+
+/**
+ * Confirms with the Auth server that the session is still alive. The default check is local: the
+ * JWT stays valid until it expires (up to an hour) and the passkey cookie is bound to the session
+ * id, so a revoked session would otherwise keep working until then. One round trip; fails closed.
+ */
+async function assertLiveSession(owner: Owner) {
+  let verdict: SessionVerdict;
+  try {
+    const { data, error } = await (await supabaseServer()).auth.getUser();
+    verdict = sessionVerdict(owner.id, data.user?.id, error);
+  } catch {
+    verdict = "unavailable";
+  }
+  if (verdict === "ended") throw new HttpError(401, "Your session has ended. Sign in again.", "unauthenticated");
+  if (verdict === "unavailable") throw new HttpError(503, "Couldn't confirm your session right now. Try again.", "unavailable");
+}
+
 /**
  * Wraps a route handler: re-verifies the session (local JWT check + passkey cookie — the proxy is
  * not the only gate), validates route params (malformed ids → 404), maps errors to JSON and marks
  * responses `Cache-Control: private, no-store`. Return a value to send it as JSON, or a Response.
+ *
+ * `fresh: true` also asks the Auth server whether the session still exists — for endpoints that
+ * hand out everything (export) or change credentials and secrets (security, tokens, connections),
+ * so a session revoked elsewhere stops there at once instead of when its JWT expires.
  */
 export function withOwner<TParams = Record<string, string>>(
   handler: (ctx: OwnerContext<TParams>) => Promise<Response | unknown>,
-  opts: { params?: ZodType<TParams> } = {},
+  opts: { params?: ZodType<TParams>; fresh?: boolean } = {},
 ) {
   return async (req: Request, ctx: { params: Promise<TParams> }) => {
     try {
       const owner = await getOwner();
       if (!owner) throw new HttpError(401, "Not signed in", "unauthenticated");
       if (!owner.mfaSatisfied) throw new HttpError(401, "Passkey verification required", "mfa_required");
+      if (opts.fresh) await assertLiveSession(owner);
       const raw = ((await ctx?.params) ?? {}) as Record<string, string>;
       const params = validateParams<TParams>(raw, opts.params);
       const result = await handler({ ownerId: owner.id, owner, req, params, url: new URL(req.url) });

@@ -29,7 +29,7 @@ const body = z.object({
 });
 
 /** → EmailConnectionView (secrets never leave the server). */
-export const GET = withOwner(async ({ ownerId }) => getEmailConnectionView(ownerId));
+export const GET = withOwner(async ({ ownerId }) => getEmailConnectionView(ownerId), { fresh: true });
 
 /** Save the e-mail connection (409 when the environment manages it) → EmailConnectionView. */
 export const PUT = withOwner(async ({ ownerId, req }) => {
@@ -49,4 +49,4 @@ export const PUT = withOwner(async ({ ownerId, req }) => {
     }),
   );
   return getEmailConnectionView(ownerId);
-});
+}, { fresh: true });
