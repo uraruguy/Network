@@ -1,17 +1,22 @@
 "use client";
-import { useInfiniteQuery, useIsMutating, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { onlineManager, useInfiniteQuery, useIsMutating, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { toast } from "@/components/ui/Toast";
 import { api, ApiError } from "@/lib/api";
+import type { MergeReport } from "@/lib/data/people-merge";
+import type { NoteDoc } from "@/lib/notes/cache";
 import type { PersonInput, PersonPatch } from "@/lib/schemas";
 import { fold } from "@/lib/text";
 import { matchesText, toLegacyDetail, toPersonListItem } from "./compat";
+import { chatKeys } from "./chat";
 import { keys } from "./keys";
 import { applyPersonPatch, indexRowFromDetail, seedPersonDetail, upsertIndexRow, type Lookups } from "./people-cache";
 import { registerReminderMutations } from "./reminders";
 import { registerTaxonomyMutations, useActivities } from "./taxonomy";
 import type { ActivityRow, Category, NotesPage, PeopleSearchPage, PersonDetailApi, PersonIndexRow, RecentNoteApi, TagRow } from "./types";
 import { activityEntity, personEntity, scopeFor } from "./write-order";
+
+export type { MergeReport };
 
 export type PeopleFilters = { q?: string; category?: string; warmth?: string; country?: string };
 
@@ -120,6 +125,22 @@ export function usePersonNotes(personId: string | null, opts: { full?: boolean; 
   });
 }
 
+/**
+ * What merging `id` into `into` would move (a server-side dry run, nothing saved). Live only:
+ * never persisted, refetched each time the pair is shown.
+ */
+export function useMergePreview(id: string, into: string | null) {
+  return useQuery({
+    queryKey: keys.mergePreview(id, into ?? ""),
+    queryFn: () => api.get<MergeReport>(`/api/people/${id}/merge?into=${into}`),
+    enabled: !!into && into !== id,
+    staleTime: 0,
+    gcTime: 60_000,
+    retry: false,
+    meta: { persist: false },
+  });
+}
+
 /* ---------- optimistic cache plumbing ---------- */
 
 /** Everything cached that optimistic person writes resolve relations from. */
@@ -172,6 +193,39 @@ function invalidatePeople(qc: QueryClient, id?: string) {
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : undefined);
 
+/**
+ * Removes cached queries now — or, while a screen still shows them, once it lets go: the page of
+ * a card being merged away keeps its data until it navigates, instead of refetching a 404.
+ */
+function removeWhenUnobserved(qc: QueryClient, queryKey: readonly unknown[], exact = false) {
+  const cache = qc.getQueryCache();
+  for (const query of cache.findAll({ queryKey, exact })) {
+    if (!query.getObserversCount()) {
+      cache.remove(query);
+      continue;
+    }
+    const unsubscribe = cache.subscribe((e) => {
+      if (e.query !== query || e.type !== "observerRemoved" || query.getObserversCount()) return;
+      unsubscribe();
+      cache.remove(query);
+    });
+  }
+}
+
+/**
+ * After a merge, everything cached about the duplicate belongs to the kept person: its profile
+ * and note list leave the cache, and open note documents (possibly with unsynced edits) are
+ * re-pointed so a later save can't move a note back onto the removed card.
+ */
+function forgetMergedPerson(qc: QueryClient, dropId: string, keepId: string) {
+  removeFromIndex(qc, dropId);
+  removeWhenUnobserved(qc, keys.person(dropId), true);
+  removeWhenUnobserved(qc, keys.personNotes(dropId));
+  for (const [key, doc] of qc.getQueriesData<NoteDoc>({ queryKey: ["note"] })) {
+    if (doc?.personId === dropId) qc.setQueryData(key, { ...doc, personId: keepId });
+  }
+}
+
 /* ---------- mutations (defaults registered once so paused/offline mutations can resume after reload) ---------- */
 
 export const MUT = {
@@ -179,10 +233,22 @@ export const MUT = {
   updatePerson: ["people", "update"] as const,
   deletePerson: ["people", "delete"] as const,
   restorePerson: ["people", "restore"] as const,
+  mergePeople: ["people", "merge"] as const,
 };
 
 export type CreatePersonVars = PersonInput & { id: string };
 export type UpdatePersonVars = { id: string; patch: PersonPatch };
+/** Merge person `id` (the duplicate, removed) into `into` (kept). */
+export type MergePeopleVars = { id: string; into: string };
+export type MergePeopleResult = { person: PersonDetailApi; report: MergeReport };
+
+/** A merge never queues: it rewrites two people at once, so it runs now or fails loudly. */
+export class OfflineMergeError extends Error {
+  constructor() {
+    super("You’re offline. Merging needs a connection.");
+    this.name = "OfflineMergeError";
+  }
+}
 
 /**
  * Registers mutation defaults for people — and, until the providers call each registrar, also
@@ -250,6 +316,29 @@ export function registerPeopleMutations(qc: QueryClient) {
       invalidatePeople(qc, id);
     },
   });
+  qc.setMutationDefaults<MergePeopleResult, Error, MergePeopleVars>(MUT.mergePeople, {
+    mutationFn: ({ id, into }: MergePeopleVars) => {
+      if (!onlineManager.isOnline()) throw new OfflineMergeError();
+      return api.post<MergePeopleResult>(`/api/people/${id}/merge`, { into });
+    },
+    // Online-only and never retried or replayed (see isReplayableWrite): a repeat after a lost
+    // response would 404 on the removed duplicate.
+    networkMode: "always",
+    retry: false,
+    onSuccess: ({ person }: MergePeopleResult, { id }: MergePeopleVars) => {
+      forgetMergedPerson(qc, id, person.id);
+      putPerson(qc, person);
+    },
+    onError: (e: unknown) => toast.error("Couldn’t merge", { description: errorText(e) }),
+    onSettled: (_d: unknown, _e: unknown, { id, into }: MergePeopleVars) => {
+      qc.invalidateQueries({ queryKey: ["reminders"] });
+      // Every note list (Today, the kept person's) — except the duplicate's own, which is going away.
+      qc.invalidateQueries({ queryKey: ["notes"], predicate: (q) => !(q.queryKey[1] === "person" && q.queryKey[2] === id) });
+      qc.invalidateQueries({ queryKey: chatKeys.threads() });
+      qc.invalidateQueries({ queryKey: keys.stats() });
+      invalidatePeople(qc, into);
+    },
+  });
   registerTaxonomyMutations(qc);
   registerReminderMutations(qc);
 }
@@ -294,6 +383,12 @@ export function personWrites(qc: QueryClient) {
     },
     restore(id: string): Promise<PersonDetailApi> {
       return runPerson<PersonDetailApi, string>(qc, MUT.restorePerson, id, id);
+    },
+    /** Merges `id` into `into`, behind the duplicate's queued writes (else the kept person's). Rejects (and toasts) offline. */
+    merge(id: string, into: string): Promise<MergePeopleResult> {
+      const scope = scopeFor(qc, `person:${id}`, [personEntity(into)]);
+      const mutation = qc.getMutationCache().build<MergePeopleResult, Error, MergePeopleVars, unknown>(qc, { mutationKey: MUT.mergePeople, scope: { id: scope } });
+      return mutation.execute({ id, into });
     },
   };
 }

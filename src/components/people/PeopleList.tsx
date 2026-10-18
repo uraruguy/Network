@@ -18,6 +18,7 @@ import { NOTE_SEARCH_MIN, usePeopleList, usePeopleNoteSearch } from "@/lib/queri
 import { useActivities } from "@/lib/queries/taxonomy";
 import type { NoteSearchHit } from "@/lib/queries/types";
 import { cn } from "@/lib/utils";
+import { DuplicateSuggestions } from "./DuplicateSuggestions";
 import { PeopleVirtualList, type PeopleVirtualListHandle } from "./PeopleVirtualList";
 import { compactAgo, PERSON_ROW_HEIGHT } from "./PersonRow";
 import { NewPersonSheet } from "./PersonSheet";
@@ -152,6 +153,8 @@ export function PeopleList() {
           />
         ) : (
           <>
+            {/* Always mounted, so the virtual list re-measures its offset when suggestions come and go. */}
+            <div>{!list.filtered && <DuplicateSuggestions people={list.all} />}</div>
             <PeopleVirtualList
               people={list.rows}
               emojiById={emojiById}

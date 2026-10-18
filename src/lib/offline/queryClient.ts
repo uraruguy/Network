@@ -53,13 +53,15 @@ export function shouldPersistQuery(query: Pick<Query, "queryKey" | "meta" | "sta
 
 /**
  * Writes that can be sent again when their outcome is unknown (idempotent: client ids, PUTs,
- * PATCHes, deletes). Completing a follow-up is not — a repeat would skip a recurrence.
+ * PATCHes, deletes). Completing a follow-up is not — a repeat would skip a recurrence — and
+ * neither is merging two people (online-only; a repeat 404s on the removed duplicate).
  */
 export function isReplayableWrite(mutationKey: readonly unknown[] | undefined, variables: unknown): boolean {
   const [root, op] = mutationKey ?? [];
   switch (root) {
-    case "notes":
     case "people":
+      return op !== "merge";
+    case "notes":
     case "activities":
     case "settings":
     case "chat":
