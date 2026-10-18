@@ -243,7 +243,7 @@ function factsMarkdown(facts: string[], threads: OpenThread[], extra: { howICanH
   return parts.join("\n\n");
 }
 
-const mdToText = (md: string) =>
+export const mdToText = (md: string) =>
   md
     .replace(/^#+\s*/gm, "")
     .replace(/\*\*(.+?)\*\*/g, "$1")
@@ -252,7 +252,7 @@ const mdToText = (md: string) =>
     .replace(/^- /gm, "• ");
 
 /** Merges new markdown lines into an existing facts note without dropping anything already there. */
-function mergeFactsMd(existing: string, next: string) {
+export function mergeFactsMd(existing: string, next: string) {
   const have = new Set(existing.split("\n").map((l) => l.trim()).filter(Boolean));
   const add = next.split("\n").filter((l) => l.trim() && !have.has(l.trim()) && !/^## /.test(l));
   return add.length ? `${existing.trimEnd()}\n${add.join("\n")}` : existing;
