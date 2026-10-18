@@ -4,10 +4,10 @@ import { DefaultChatTransport, type UIMessage } from "ai";
 import { AnimatePresence, motion } from "motion/react";
 import { ArrowDown, RotateCcw, Sparkles, Zap } from "lucide-react";
 import { useRef, useState } from "react";
+import { Composer } from "@/components/composer/Composer";
 import { GlassButton } from "@/components/glass/GlassButton";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { fadeScale, useMotionSafe } from "@/lib/motion";
-import { ChatComposer } from "./ChatComposer";
 import { ChatEmpty } from "./ChatEmpty";
 import { Message } from "./Message";
 import { useStickToBottom } from "./useStickToBottom";
@@ -142,12 +142,14 @@ export function ChatSession({ threadId, initialMessages, personId, personName, h
       </div>
 
       <div className="mx-auto w-full max-w-[760px] pt-2">
-        <ChatComposer
+        <Composer
           value={input}
-          onChange={setInput}
-          onSubmit={() => send(input)}
-          busy={busy}
+          onValueChange={setInput}
+          onSubmit={send}
+          submitOnEnter="desktop"
+          streaming={busy}
           onStop={() => void stop()}
+          label="Message"
           placeholder={personName ? `Ask about ${personName}…` : "Ask, add a note, plan a follow-up…"}
           accessory={
             <SegmentedControl
@@ -155,9 +157,11 @@ export function ChatSession({ threadId, initialMessages, personId, personName, h
               aria-label="Model"
               value={model}
               onChange={onModelChange}
+              // Icons only on phones so the text field keeps its width.
+              className="mb-0.5 max-sm:[&_button]:gap-0"
               items={[
-                { value: "smart", label: "Smart", icon: <Sparkles /> },
-                { value: "fast", label: "Fast", icon: <Zap /> },
+                { value: "smart", label: <span className="max-sm:hidden">Smart</span>, ariaLabel: "Smart", icon: <Sparkles /> },
+                { value: "fast", label: <span className="max-sm:hidden">Fast</span>, ariaLabel: "Fast", icon: <Zap /> },
               ]}
             />
           }

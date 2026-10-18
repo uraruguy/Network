@@ -106,7 +106,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   }, [value, maxRows]);
 
   const text = value.trim();
-  const canSend = !!text && !pending && !disabled;
+  // While streaming the button is Stop: ⌘↩ / Enter must not send (and clear) the next message.
+  const canSend = !!text && !pending && !disabled && !streaming;
 
   const submit = () => {
     if (!canSend) return;
