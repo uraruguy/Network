@@ -277,8 +277,10 @@ still does.
 
 **Rotate `APP_SECRET`.** Set `APP_SECRET_PREVIOUS` to the current value and `APP_SECRET` to a new one
 (`openssl rand -base64 48`), redeploy. Old passkey cookies, e-mail links and stored keys keep working.
-Then re-save the AI and e-mail connections (re-encrypts their keys) and regenerate recovery codes
-(Settings → Security). After 30 days (cookie and link lifetime) remove `APP_SECRET_PREVIOUS`.
+Then open Settings → Connections once: stored AI and e-mail keys are re-encrypted with the new secret
+whenever they're read or saved (chat and the daily digest do it too), and the status there shows any
+key that can't be read. Regenerate recovery codes (Settings → Security). After 30 days (cookie and
+link lifetime) remove `APP_SECRET_PREVIOUS`.
 
 **A device or token is compromised.** Settings → Security → *Sign out other devices*; Settings →
 Connected apps → revoke tokens and disconnect apps; then change the password.

@@ -11,8 +11,11 @@ export const PATCH = withOwner<{ id: string }>(async ({ ownerId, params, req }) 
   return (await updatePerson(ownerId, params.id, patch)) ?? notFound();
 });
 
-/** Soft delete (undo with POST /api/people/[id]/restore). */
+/**
+ * Soft delete (undo with POST /api/people/[id]/restore). Idempotent like notes and reminders: a
+ * retried delete whose first response was lost (offline queue) succeeds instead of 404-ing.
+ */
 export const DELETE = withOwner<{ id: string }>(async ({ ownerId, params }) => {
-  if (!(await deletePerson(ownerId, params.id))) notFound();
+  await deletePerson(ownerId, params.id);
   return { ok: true };
 });

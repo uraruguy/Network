@@ -15,11 +15,17 @@ export async function getProfile(ownerId: string) {
   return { ...row.profile, homeLocation: row.homeLocation };
 }
 
+/** Partial update → the profile row. Undefined fields are skipped; an empty patch changes nothing. */
 export async function updateProfile(
   ownerId: string,
   patch: Partial<Pick<schema.Profile, "displayName" | "timezone" | "homeLocationId" | "digestHour" | "digestEnabled" | "inboxToken" | "lastDigestOn">>,
 ) {
-  const [row] = await db.update(profiles).set(patch).where(eq(profiles.id, ownerId)).returning();
+  const values = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as typeof patch;
+  if (!Object.keys(values).length) {
+    const [row] = await db.select().from(profiles).where(eq(profiles.id, ownerId));
+    return row ?? null;
+  }
+  const [row] = await db.update(profiles).set(values).where(eq(profiles.id, ownerId)).returning();
   return row ?? null;
 }
 
