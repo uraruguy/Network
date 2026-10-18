@@ -87,8 +87,9 @@ function tabWhere(tab: ReviewTab) {
 export async function listProposals(db: DbOrTx, ownerId: string, source: string, tab: ReviewTab, cursor?: string | null) {
   const offset = Math.max(0, Number(cursor) || 0);
   const mentionCount = sql<number>`(select count(*)::int from import_mentions m where m.import_person_id = ${importPeople.id})`;
+  const committedDeleted = sql<boolean>`exists (select 1 from people cp where cp.id = ${importPeople.committedPersonId} and cp.deleted_at is not null)`;
   const rows = await db
-    .select({ p: importPeople, mentions: mentionCount, matchName: schema.people.displayName })
+    .select({ p: importPeople, mentions: mentionCount, matchName: schema.people.displayName, matchDeletedAt: schema.people.deletedAt, committedDeleted })
     .from(importPeople)
     .leftJoin(schema.people, eq(schema.people.id, importPeople.matchPersonId))
     .where(and(eq(importPeople.ownerId, ownerId), eq(importPeople.source, source), tabWhere(tab)))
@@ -174,8 +175,10 @@ export async function listProposals(db: DbOrTx, ownerId: string, source: string,
       reviewFlags: r.p.reviewFlags,
       decidedBy: r.p.decidedBy,
       createReminder: r.p.createReminder,
-      matchPerson: r.p.matchPersonId ? { id: r.p.matchPersonId, displayName: r.matchName } : null,
+      /** `deleted`: the user deleted that person in The Network; the commit skips this proposal. */
+      matchPerson: r.p.matchPersonId ? { id: r.p.matchPersonId, displayName: r.matchName, deleted: !!r.matchDeletedAt } : null,
       committedPersonId: r.p.committedPersonId,
+      committedPersonDeleted: !!r.committedDeleted,
       mergedIntoId: r.p.mergedIntoId,
       profile: readProfile(r.p.profile),
       place: places.get(r.p.id) ?? null,
@@ -220,7 +223,7 @@ type HistoryEntry = {
   action: DecisionInput["action"];
   prev: Snapshot;
   moved?: { mentionIds: string[]; to: string };
-  intoPrev?: { id: string; aliases: string[]; profile: unknown };
+  intoPrev?: { id: string; aliases: string[]; profile: unknown; status?: ImportPerson["status"] };
   splitInto?: string;
 };
 
@@ -257,6 +260,12 @@ async function itemsOf(tx: Tx, proposalIds: string[]) {
   return rows.map((r) => r.itemId);
 }
 
+/**
+ * Moves `from`'s mentions, aliases and profile onto `into`. Merging into someone already committed
+ * puts them back to approved: the next commit then fills the new blanks on their person (it targets
+ * committedPersonId), merges the facts into their facts note and files the moved notes — otherwise
+ * the merged-away profile would never reach The Network. Undo restores the committed status.
+ */
 export async function mergeProposals(tx: Tx, ownerId: string, fromId: string, intoId: string, history = true) {
   if (fromId === intoId) throw new HttpError(422, "Cannot merge a proposal into itself");
   const from = await lockProposal(tx, ownerId, fromId);
@@ -275,6 +284,7 @@ export async function mergeProposals(tx: Tx, ownerId: string, fromId: string, in
       profile: { ...(into.profile as object), ...mergeProfiles(readProfile(into.profile), readProfile(from.profile)) },
       matchPersonId: into.matchPersonId ?? from.matchPersonId,
       reviewFlags: into.reviewFlags.filter((f) => f !== "possible_duplicate"),
+      ...(into.status === "committed" ? { status: "approved" as const } : {}),
     })
     .where(eq(importPeople.id, into.id));
   await tx
@@ -284,7 +294,13 @@ export async function mergeProposals(tx: Tx, ownerId: string, fromId: string, in
       mergedIntoId: into.id,
       ...userDecided(),
       history: history
-        ? pushHistory(from, { at: new Date().toISOString(), action: "merge", prev: snap(from), moved: { mentionIds: moved.map((m) => m.id), to: into.id }, intoPrev: { id: into.id, aliases: into.aliases, profile: into.profile } })
+        ? pushHistory(from, {
+            at: new Date().toISOString(),
+            action: "merge",
+            prev: snap(from),
+            moved: { mentionIds: moved.map((m) => m.id), to: into.id },
+            intoPrev: { id: into.id, aliases: into.aliases, profile: into.profile, status: into.status },
+          })
         : from.history,
     })
     .where(eq(importPeople.id, from.id));
@@ -348,7 +364,10 @@ async function undo(tx: Tx, ownerId: string, p: ImportPerson) {
       .where(and(inArray(importMentions.id, last.moved.mentionIds), eq(importMentions.importPersonId, last.moved.to)));
     if (last.splitInto) await tx.delete(importPeople).where(and(eq(importPeople.id, last.splitInto), ne(importPeople.status, "committed")));
   }
-  if (last.intoPrev) await tx.update(importPeople).set({ aliases: last.intoPrev.aliases, profile: last.intoPrev.profile }).where(eq(importPeople.id, last.intoPrev.id));
+  if (last.intoPrev) {
+    const status = last.intoPrev.status === "committed" ? { status: "committed" as const } : {};
+    await tx.update(importPeople).set({ aliases: last.intoPrev.aliases, profile: last.intoPrev.profile, ...status }).where(eq(importPeople.id, last.intoPrev.id));
+  }
   const prev = last.prev;
   await tx
     .update(importPeople)

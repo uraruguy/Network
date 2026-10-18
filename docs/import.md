@@ -10,7 +10,11 @@ There are two ways in:
 | | When | Where the AI runs |
 | --- | --- | --- |
 | **Paste a note** (Import → Paste a note) | one note, an e-mail, a call transcript | the AI connection from Settings → AI & e-mail |
+| **Inbox** (the iPhone Shortcut, or Capture on Today) | a quick capture, applied after triage | the AI connection from Settings → AI & e-mail |
 | **Apple Notes pipeline** (this page) | your whole Notes library, re-run whenever you like | your Mac, through the CLI in `scripts/import` |
+
+Pastes and inbox captures are saved through the same commit as the pipeline (one transaction,
+logged, undoable); applying a capture twice returns the first result instead of failing.
 
 The pipeline's AI stages default to your **Claude subscription** via the Claude Agent SDK
 (`agent-sdk`: run `claude` once and `/login`), so a library of thousands of notes costs nothing extra.
@@ -112,7 +116,18 @@ pnpm import:spotcheck --run 2026-10-18 --env .env.cloud.local --yes-prod        
 ```
 
 A commit only fills blanks on people who already exist, keeps every note verbatim under its person,
-adds at most one imported follow-up per person, and logs every row it touches in `import_commit_log`.
+adds one pinned key-facts note and at most one imported follow-up per person (also when two
+proposals end up as the same person), and logs every row it touches in `import_commit_log`.
+Re-running it is safe, and it never undoes what you did in the app since:
+
+- a note (or excerpt, or key-facts note) you **deleted** stays deleted;
+- a note you **edited** in The Network keeps your version, even when the Apple note changed (new key
+  facts for a facts note you edited are reported as warnings instead of merged);
+- a person you **deleted** is skipped, not recreated (the commit panel and `commit` list them);
+- merging a proposal into someone already committed sends their facts to that person next commit.
+
+The ≤3-reminders-per-day spread and introductions (“introduced by”) work across commits, so the
+app's chunked commit (20 people at a time) and resumed CLI runs give the same result as one run.
 
 **Rollback** (exact, in reverse order, one transaction):
 
@@ -122,8 +137,11 @@ pnpm import:rollback --commit <commitId> --env .env.cloud.local --yes-prod --wri
 pnpm import:rollback --all --source apple-notes --env .env.cloud.local --yes-prod --write
 ```
 
-It refuses to delete an imported person you have since added notes or follow-ups to, unless `--force`.
-The app's commit panel has the same undo.
+It refuses to delete an imported person you have since built on — notes, follow-ups, tags,
+categories, activities, mentions in your own notes, people they introduced, chat threads — unless
+`--force`. Places, tags and activities the commit created are kept while anything else still uses
+them. Fields the commit filled go back to their previous value even if you changed them since
+(the log stores only the previous values). The app's commit panel has the same undo.
 
 ## Rehearsal on a local copy
 

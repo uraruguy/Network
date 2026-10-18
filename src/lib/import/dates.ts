@@ -47,6 +47,15 @@ export function noteDate(input: { title: string | null; occurredAt?: string | nu
   return { date: now, source: "now" };
 }
 
+/**
+ * A whole-word matcher for `alternatives`. `\b` only knows ASCII word characters (even with the `u`
+ * flag), so "četrtek" never matched `\bčetrtek\b`: letters and digits on either side are excluded
+ * by Unicode property instead.
+ */
+export function wordPattern(alternatives: string): RegExp {
+  return new RegExp(`(?<![\\p{L}\\p{N}_])(?:${alternatives})(?![\\p{L}\\p{N}_])`, "u");
+}
+
 const SI_MONTHS: Record<string, number> = {
   jan: 1, januar: 1, januarja: 1, january: 1,
   feb: 2, februar: 2, februarja: 2, february: 2,
@@ -70,6 +79,10 @@ const WEEKDAYS: Record<string, number> = {
   petek: 5, friday: 5,
   sobota: 6, soboto: 6, saturday: 6,
 };
+const WEEKDAY_RES = Object.entries(WEEKDAYS).map(([name, wd]) => [wordPattern(name), wd] as const);
+const MONTH_RES = Object.entries(SI_MONTHS).map(([name, mo]) => [wordPattern(name), mo] as const);
+const TOMORROW = wordPattern("jutri|tomorrow");
+const DAY_AFTER = wordPattern("pojutrišnjem|pojutrisnjem");
 
 /**
  * Resolves a follow-up's "when" against the note date. Handles ISO dates, dd.mm.(yyyy),
@@ -103,18 +116,18 @@ export function resolveWhen(when: string | null | undefined, base: Date): Date |
     if (/^(mes|month)/.test(u)) return new Date(Date.UTC(b.getUTCFullYear(), b.getUTCMonth() + n, b.getUTCDate(), 12));
     return new Date(Date.UTC(b.getUTCFullYear() + n, b.getUTCMonth(), b.getUTCDate(), 12));
   }
-  if (/\b(jutri|tomorrow)\b/.test(w)) return addDays(1);
-  if (/\b(pojutrišnjem|pojutrisnjem)\b/.test(w)) return addDays(2);
+  if (TOMORROW.test(w)) return addDays(1);
+  if (DAY_AFTER.test(w)) return addDays(2);
   if (/(naslednji|naslednjem|drug|next)\s+(teden|tednu|week)/.test(w)) return addDays(7);
   if (/(naslednji|naslednjem|drug|next)\s+(mesec|mesecu|month)/.test(w)) return new Date(Date.UTC(b.getUTCFullYear(), b.getUTCMonth() + 1, b.getUTCDate(), 12));
-  for (const [name, wd] of Object.entries(WEEKDAYS)) {
-    if (new RegExp(`\\b${name}\\b`).test(w)) {
+  for (const [re, wd] of WEEKDAY_RES) {
+    if (re.test(w)) {
       const delta = ((wd - b.getUTCDay() + 7) % 7) || 7;
       return addDays(delta);
     }
   }
-  for (const [name, mo] of Object.entries(SI_MONTHS)) {
-    if (new RegExp(`\\b${name}\\b`).test(w)) {
+  for (const [re, mo] of MONTH_RES) {
+    if (re.test(w)) {
       let y = b.getUTCFullYear();
       if (mo - 1 < b.getUTCMonth()) y++;
       return new Date(Date.UTC(y, mo - 1, 1, 12));

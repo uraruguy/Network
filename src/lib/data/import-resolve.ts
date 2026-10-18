@@ -3,7 +3,8 @@
  * ResolutionFile / FilingFile outputs to import_people + import_mentions, runs the auto-decision
  * policy and cross-packet reconciliation.
  */
-import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import { people as peopleTable } from "@/lib/db/schema";
 import { importItemsX, importMentions, importPeople, type ImportPerson } from "@/lib/db/schema-import";
 import type { Anchor, FilingFile, ResolutionFile, ResolvePacket } from "@/lib/import/contracts";
 import { decideFiling, type FilingDecision, type FilingInput, type FilingMention, type FilingPerson } from "@/lib/import/filing";
@@ -121,6 +122,14 @@ export async function applyResolution(tx: Tx, ownerId: string, source: string, f
     .for("update");
   const byKey = new Map(existing.map((p) => [p.key, p]));
   const touched = new Set<string>();
+  // Committed proposals whose person the user deleted stay committed when enriched: approving them
+  // again would only make every commit report the skip.
+  const committedIds = existing.map((p) => p.committedPersonId).filter((x): x is string => !!x);
+  const deletedPeople = new Set(
+    committedIds.length
+      ? (await tx.select({ id: peopleTable.id }).from(peopleTable).where(and(eq(peopleTable.ownerId, ownerId), inArray(peopleTable.id, committedIds), isNotNull(peopleTable.deletedAt)))).map((r) => r.id)
+      : [],
+  );
 
   for (const p of file.people) {
     const flags = addFlags(p.reviewFlags, p.possibleSameAs.length > 0 && "possible_duplicate", p.needsReview && p.reviewFlags.length === 0 && "user_attention");
@@ -133,14 +142,15 @@ export async function applyResolution(tx: Tx, ownerId: string, source: string, f
     if (prev && (prev.decidedBy === "user" || prev.status === "committed")) {
       // Decided by Jakob or already committed: never change the decision or the name — only enrich
       // the profile (fill blanks, union lists). A committed person goes back to approved so the next
-      // commit fills the new blanks on the person and merges the new facts.
+      // commit fills the new blanks on the person and merges the new facts (unless they were deleted).
       const names = prev.profile as StoredNames;
+      const gone = !!prev.committedPersonId && deletedPeople.has(prev.committedPersonId);
       await tx
         .update(importPeople)
         .set({
           aliases: [...new Set([...prev.aliases, ...p.aliases])].filter((a) => a !== prev.displayName),
           profile: { ...mergeProfiles(readProfile(prev.profile), p.profile), firstName: names.firstName ?? p.firstName, lastName: names.lastName ?? p.lastName },
-          status: prev.status === "committed" ? "approved" : prev.status,
+          status: prev.status === "committed" && !gone ? "approved" : prev.status,
           proposalFile: prev.proposalFile && !prev.proposalFile.includes(fileName) ? `${prev.proposalFile},${fileName}` : fileName,
         })
         .where(eq(importPeople.id, prev.id));
@@ -236,7 +246,10 @@ export async function applyResolution(tx: Tx, ownerId: string, source: string, f
 /*  Policy                                                             */
 /* ------------------------------------------------------------------ */
 
-/** Re-evaluates auto decisions (never touches proposals Jakob decided, merged or committed ones). */
+/**
+ * Re-evaluates auto decisions. Never touches proposals Jakob decided, merged or committed ones, nor
+ * ones committed before and back to approved (enriched, or merged into): their person exists.
+ */
 export async function recomputePolicy(tx: Tx, ownerId: string, source: string, ids?: string[]) {
   if (ids && !ids.length) return { approved: 0, rejected: 0, review: 0 };
   const rows = await tx
@@ -251,7 +264,7 @@ export async function recomputePolicy(tx: Tx, ownerId: string, source: string, i
   for (const r of conf) if (r.pid) byPerson.set(r.pid, [...(byPerson.get(r.pid) ?? []), r.c ?? 0]);
   const out = { approved: 0, rejected: 0, review: 0 };
   for (const p of rows) {
-    if (p.decidedBy === "user" || p.status === "merged" || p.status === "committed") continue;
+    if (p.decidedBy === "user" || p.status === "merged" || p.status === "committed" || p.committedPersonId) continue;
     const raw = p.profile as StoredNames;
     const d = decidePolicy({
       disposition: p.disposition,

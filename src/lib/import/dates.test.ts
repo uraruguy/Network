@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dateFromTitle, fromIsoDay, isoDay, noteDate, resolveWhen } from "./dates";
+import { dateFromTitle, fromIsoDay, isoDay, noteDate, resolveWhen, wordPattern } from "./dates";
 
 const d = (s: string) => fromIsoDay(s)!;
 
@@ -48,6 +48,20 @@ describe("resolveWhen", () => {
     expect(isoDay(resolveWhen("v ponedeljek", base)!)).toBe("2026-10-05");
     expect(isoDay(resolveWhen("januarja", base)!)).toBe("2027-01-01");
     expect(isoDay(resolveWhen("čez en mesec", base)!)).toBe("2026-11-01");
+  });
+  it("weekdays and words with diacritics", () => {
+    expect(isoDay(resolveWhen("pokliči v četrtek", base)!)).toBe("2026-10-08");
+    expect(isoDay(resolveWhen("Četrtek zjutraj", base)!)).toBe("2026-10-08");
+    expect(isoDay(resolveWhen("v cetrtek", base)!)).toBe("2026-10-08");
+    expect(isoDay(resolveWhen("v sredo", base)!)).toBe("2026-10-07");
+    expect(isoDay(resolveWhen("pojutrišnjem", base)!)).toBe("2026-10-03");
+    expect(isoDay(resolveWhen("do 1. decembra", base)!)).toBe("2026-12-01");
+  });
+  it("matches whole words only", () => {
+    expect(resolveWhen("predčetrtek", base)).toBeNull();
+    expect(resolveWhen("majhen problem", base)).toBeNull();
+    expect(wordPattern("četrtek").test("četrtek.")).toBe(true);
+    expect(wordPattern("četrtek").test("četrtekom")).toBe(false);
   });
   it("null when nothing parses", () => {
     expect(resolveWhen("ko bo čas", base)).toBeNull();

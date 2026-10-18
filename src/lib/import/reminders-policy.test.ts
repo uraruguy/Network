@@ -60,6 +60,27 @@ describe("planReminders", () => {
     expect([...plans.values()].filter((p) => p.openThreads.some((t) => t.why === "overflow")).length).toBe(3);
   });
 
+  it("counts reminders already pending from earlier commits toward the ≤3/day spread", () => {
+    const taken = [d("2026-10-18"), d("2026-10-18"), d("2026-10-18"), d("2026-10-19"), d("2026-10-19")];
+    const people = Array.from({ length: 4 }, (_, i) => ({ key: `p${i}`, createReminder: true, followUps: [{ what: `t${i}`, when: null, noteDate: d("2026-10-10") }] }));
+    const days = [...planReminders(people, now, { taken }).values()].map((p) => isoDay(p.reminder!.dueAt)).sort();
+    expect(days).toEqual(["2026-10-19", "2026-10-20", "2026-10-20", "2026-10-20"]);
+  });
+
+  it("hasReminder → open threads only, and the plan keeps the covered follow-ups", () => {
+    const plans = planReminders(
+      [
+        { key: "has", createReminder: true, hasReminder: true, followUps: [{ what: "Call", when: null, noteDate: d("2026-10-10") }] },
+        { key: "new", createReminder: true, followUps: [{ what: "Ping", when: null, noteDate: d("2026-10-10") }] },
+      ],
+      now,
+    );
+    expect(plans.get("has")!.reminder).toBeNull();
+    expect(plans.get("has")!.openThreads[0]).toMatchObject({ what: "Call", why: "existing" });
+    expect(plans.get("new")!.reminder!.threads.map((t) => t.what)).toEqual(["Ping"]);
+    expect(isoDay(plans.get("new")!.reminder!.dueAt)).toBe("2026-10-18");
+  });
+
   it("createReminder=false → everything is an open thread", () => {
     const plan = planReminders([{ key: "x", createReminder: false, followUps: [{ what: "A", when: null, explicitDate: "2027-01-01", noteDate: d("2026-10-01") }] }], now).get("x")!;
     expect(plan.reminder).toBeNull();

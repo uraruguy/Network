@@ -24,6 +24,8 @@ run(async () => {
   console.log(`log:     ${Object.entries(r.log).map(([k, v]) => `${k}=${v}`).join(" ")}`);
   for (const f of r.people.failed) console.log(`  ✗ person ${f.key}: ${f.error}`);
   for (const f of r.notes.failed) console.log(`  ✗ note “${f.title}”: ${f.error}`);
+  for (const s of r.people.skipped) console.log(`  – person ${s.key}: ${s.reason}`);
+  if (r.notes.deleted || r.notes.edited) console.log(`kept:    ${r.notes.deleted} notes deleted and ${r.notes.edited} edited in The Network stay as they are`);
   for (const w of [...new Set(r.warnings)].slice(0, 20)) console.log(`  ! ${w}`);
   const out = join(ctx.runDir, `commit-${r.dryRun ? "dry-" : ""}${r.commitId}.json`);
   writeFileSync(out, JSON.stringify(r, null, 2));
