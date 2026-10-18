@@ -70,7 +70,7 @@ function contentValues(patch: NotePatchData): Partial<schema.NewNote> {
 }
 
 /** Creates a note about one of the owner's people. Throws HttpError(404) for an unknown person. */
-export async function createNote(ownerId: string, input: NoteData & { id?: string }, source?: { kind: string; ref: string }): Promise<NoteDetail> {
+export async function createNote(ownerId: string, input: NoteData & { id?: string }, source?: { kind: string; ref: string | null }): Promise<NoteDetail> {
   const id = await db.transaction(async (tx) => {
     if (!(await ownsPerson(tx, ownerId, input.personId))) throw new HttpError(404, "Unknown person");
     const [row] = await tx

@@ -8,7 +8,7 @@ import { createPerson, getPerson, searchPeople, updatePerson } from "@/lib/data/
 import { completeReminder, createReminder } from "@/lib/data/reminders";
 import { personInput, personPatch, reminderInput, type LocationInput } from "@/lib/schemas";
 import { normalizeForSearch } from "@/components/ui/search";
-import { defineOp, sourceOf, ToolError, type ToolCtx } from "./registry";
+import { defineOp, noteSourceOf, sourceOf, ToolError, type ToolCtx } from "./registry";
 import { day, idsFor, names, parseDate, resolvePersonId } from "./shared";
 import { resolveDue } from "./time";
 
@@ -63,7 +63,7 @@ export const addNoteOp = defineOp({
   access: "write",
   input: z.object({
     ...personRef,
-    text: z.string().min(1).max(20_000).describe("The note (markdown allowed)"),
+    text: z.string().trim().min(1).max(20_000).describe("The note (markdown allowed)"),
     kind: z.enum(NOTE_KINDS).default("note").describe("meeting, call, message or note"),
     occurredAt: z.string().max(40).optional().describe("When it happened (YYYY-MM-DD or ISO date-time); default now"),
     title: shortText(200).optional(),
@@ -74,7 +74,7 @@ export const addNoteOp = defineOp({
     const note = await createNote(
       ctx.ownerId,
       { personId: person.id, title: input.title?.trim() || null, contentJson: null, contentMd: input.text, contentText: input.text, kind: input.kind, occurredAt: when.toISOString(), pinned: false, mentionIds: [] },
-      sourceOf(ctx),
+      noteSourceOf(ctx),
     );
     return { ok: true, noteId: note.id, person: person.name, personId: person.id, date: day(note.occurredAt, ctx.timezone), url: `/people/${person.id}/notes/${note.id}` };
   },

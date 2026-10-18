@@ -13,7 +13,24 @@ export type SessionClaims = {
   email: string | null;
   /** Set only on OAuth access tokens issued to a third-party client (e.g. an MCP connector). */
   clientId: string | null;
+  /** Unix seconds of the latest e-mail proof (reset link, magic link, OTP) in `amr`; null for password-only sessions. */
+  emailProofAt: number | null;
 };
+
+/** `amr` methods that prove control of the mailbox (Supabase's `IsRecovery()` set). */
+const EMAIL_PROOF = new Set(["recovery", "otp", "magiclink"]);
+
+function emailProofAt(amr: unknown): number | null {
+  if (!Array.isArray(amr)) return null;
+  let at: number | null = null;
+  for (const e of amr) {
+    if (e && typeof e === "object" && EMAIL_PROOF.has((e as { method?: unknown }).method as string)) {
+      const ts = (e as { timestamp?: unknown }).timestamp;
+      if (typeof ts === "number" && (at == null || ts > at)) at = ts;
+    }
+  }
+  return at;
+}
 
 /**
  * Validates the shape of verified JWT claims. Pure, so it can be unit-tested.
@@ -35,6 +52,7 @@ export function parseClaims(raw: unknown, opts: { allowOAuthClient?: boolean } =
     aal: c.aal === "aal2" ? "aal2" : "aal1",
     email: typeof c.email === "string" ? c.email : null,
     clientId,
+    emailProofAt: emailProofAt(c.amr),
   };
 }
 

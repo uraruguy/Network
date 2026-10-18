@@ -12,8 +12,15 @@ const base = {
 
 describe("parseClaims", () => {
   it("accepts a normal web session", () => {
-    expect(parseClaims(base)).toEqual({ sub: base.sub, sessionId: base.session_id, aal: "aal1", email: base.email, clientId: null });
+    expect(parseClaims(base)).toEqual({ sub: base.sub, sessionId: base.session_id, aal: "aal1", email: base.email, clientId: null, emailProofAt: null });
     expect(parseClaims({ ...base, aal: "aal2" })?.aal).toBe("aal2");
+  });
+
+  it("records the latest e-mail proof from amr, never a password sign-in", () => {
+    expect(parseClaims({ ...base, amr: [{ method: "password", timestamp: 100 }] })?.emailProofAt).toBeNull();
+    expect(parseClaims({ ...base, amr: [{ method: "recovery", timestamp: 200 }, { method: "password", timestamp: 300 }] })?.emailProofAt).toBe(200);
+    expect(parseClaims({ ...base, amr: [{ method: "otp", timestamp: 200 }, { method: "magiclink", timestamp: 250 }] })?.emailProofAt).toBe(250);
+    expect(parseClaims({ ...base, amr: ["recovery"] })?.emailProofAt).toBeNull();
   });
 
   it("rejects OAuth client tokens as web sessions", () => {

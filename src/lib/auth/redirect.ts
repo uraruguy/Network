@@ -22,6 +22,8 @@ export function safeNext(next: string | null | undefined, origin: string, fallba
     return fallback;
   }
   if (url.origin !== base.origin) return fallback;
+  // Dot segments can normalise into `//host` (`/.//evil.com`, `/a/..//evil.com`): check the output too.
+  if (url.pathname.startsWith("//")) return fallback;
   if (url.pathname === "/login" || url.pathname.startsWith("/login/") || url.pathname.startsWith("/auth/")) return fallback;
   return url.pathname + url.search + url.hash;
 }

@@ -37,9 +37,12 @@ Two factors, both required by default:
      passkey optional; the app then offers it gently (`PasskeyPrompt`).
 
 Password reset: "Forgot password?" e-mails a Supabase PKCE link → `/auth/callback` →
-`/login/reset`. The reset page needs the recovery session but not the passkey, so a leaked
-mailbox can change the password but still can't open the data. Other sessions are signed out
-after a reset or a password change.
+`/login/reset`. The reset page needs a session that proved the mailbox within the last hour
+(`amr` recovery/otp) but not the passkey, so a leaked mailbox can change the password but still
+can't open the data, and a password-only session never gets the form. Other sessions are signed
+out after a reset or a password change. Residual risk: Supabase itself knows nothing about the
+passkey, so someone holding the password can still call the Auth API directly to change it (a
+lock-out, recoverable by e-mail reset; no data access).
 
 Sessions on trusted devices are long: Supabase refresh tokens + the 30-day passkey cookie.
 **Sign out** (`signOutEverywhere()` in `src/lib/auth/signout.ts`) clears the passkey cookie,

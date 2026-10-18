@@ -37,6 +37,10 @@ describe("safeNext", () => {
     "/ /evil.com",
     " /today",
     "/%0a",
+    "/.//evil.com",
+    "/.//evil.com/x",
+    "/%2e//evil.com",
+    "/a/..//evil.com",
   ])("rejects %j", (bad) => {
     const out = safeNext(bad, ORIGIN);
     expect(out === "/today" || out === "/%0a").toBe(true);

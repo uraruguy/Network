@@ -63,7 +63,7 @@ describe("MFA cookie", () => {
 });
 
 describe("policy", () => {
-  const claims = { sub: SUB, sessionId: SESSION, aal: "aal1" as const, email: null, clientId: null };
+  const claims = { sub: SUB, sessionId: SESSION, aal: "aal1" as const, email: null, clientId: null, emailProofAt: null };
 
   it("requires a passkey unless explicitly disabled", () => {
     expect(passkeyRequired({})).toBe(true);

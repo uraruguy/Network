@@ -52,7 +52,7 @@ function post(path: string, body?: unknown, origin: string | null = ORIGIN) {
 function signedIn(opts: Partial<Owner> = {}): Owner {
   return {
     id: "114287d9-de5c-4ff5-a9b5-25d0785552e7",
-    claims: { sub: "114287d9-de5c-4ff5-a9b5-25d0785552e7", sessionId: "0b8c2f7e-6a51-4a4b-9d0e-3f1f0f6c1a11", aal: "aal1", email: "dev@local.test", clientId: null },
+    claims: { sub: "114287d9-de5c-4ff5-a9b5-25d0785552e7", sessionId: "0b8c2f7e-6a51-4a4b-9d0e-3f1f0f6c1a11", aal: "aal1", email: "dev@local.test", clientId: null, emailProofAt: null },
     mfaSatisfied: false,
     mfaVerified: false,
     ...opts,

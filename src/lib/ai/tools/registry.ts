@@ -21,7 +21,7 @@ export type Scope = (typeof SCOPES)[number];
 export type ToolActor = {
   /** The in-app assistant or an external MCP client. Stored as `source_kind` on created rows. */
   via: "chat" | "mcp";
-  /** Human-readable client ("assistant", "Claude", "Cursor", a token name). Stored as `source_ref`. */
+  /** Human-readable client ("assistant", "Claude", "Cursor", a token name). Stored as `source_ref` on people. */
   client: string;
   /** Stable credential id for the audit log and rate limits: "assistant", "pat:<id>", "oauth:<client id>". */
   credential: string;
@@ -84,6 +84,12 @@ export const auditActor = (actor: ToolActor) => `${actor.via}:${actor.credential
 
 /** Provenance for rows created by a tool (`source_kind` / `source_ref`). */
 export const sourceOf = (ctx: ToolCtx) => ({ kind: ctx.actor.via, ref: ctx.actor.client.slice(0, 120) });
+
+/**
+ * Provenance for notes: the kind only. A note's (`source_kind`, `source_ref`) is unique while live
+ * (it is the import's idempotency key), so a per-client ref would allow one note per client.
+ */
+export const noteSourceOf = (ctx: ToolCtx) => ({ kind: ctx.actor.via, ref: null });
 
 function formatIssues(error: z.ZodError) {
   return error.issues

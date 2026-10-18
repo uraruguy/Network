@@ -5,7 +5,7 @@ const audit = vi.hoisted(() => ({ recordAudit: vi.fn(async () => {}), countActio
 vi.mock("@/lib/data/audit", () => audit);
 
 import { HttpError } from "@/lib/errors";
-import { auditActor, defineOp, MCP_WRITES_PER_HOUR, runOp, sourceOf, ToolError, type ToolCtx } from "./registry";
+import { auditActor, defineOp, MCP_WRITES_PER_HOUR, noteSourceOf, runOp, sourceOf, ToolError, type ToolCtx } from "./registry";
 
 const OWNER = "114287d9-de5c-4ff5-a9b5-25d0785552e7";
 const ctx = (over: Partial<ToolCtx> = {}): ToolCtx => ({
@@ -153,5 +153,7 @@ describe("helpers", () => {
   it("builds audit actors and provenance", () => {
     expect(auditActor({ via: "chat", client: "assistant", credential: "assistant" })).toBe("chat:assistant");
     expect(sourceOf(ctx())).toEqual({ kind: "mcp", ref: "Cursor" });
+    // Notes: no ref, or the unique (source_kind, source_ref) index allows one live note per client.
+    expect(noteSourceOf(ctx())).toEqual({ kind: "mcp", ref: null });
   });
 });
