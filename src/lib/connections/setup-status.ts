@@ -173,7 +173,7 @@ export async function getSetupStatus(ownerId: string, env: Record<string, string
             label: "Digest schedule",
             state: "todo",
             detail: "Nothing calls the digest yet. With Supabase pg_cron, run this once in the SQL editor (your URL + CRON_SECRET):",
-            command: "select set_digest_target('https://your-app.example.com', '<CRON_SECRET>');",
+            command: "select private.set_digest_target('https://your-app.example.com', '<CRON_SECRET>');",
             href: "/settings/digest",
           },
   );
