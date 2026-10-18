@@ -27,11 +27,19 @@ updates:
         patterns: ["serwist", "@serwist/*"]
       drizzle:
         patterns: ["drizzle-orm", "drizzle-kit", "postgres"]
+      # The catch-alls must not take packages the named groups own (eslint-config-next, drizzle-kit
+      # and @serwist/cli kept landing here and conflicting with the group PRs in pnpm-lock.yaml).
       dev-tooling:
         dependency-type: development
         update-types: [minor, patch]
+        exclude-patterns: ["next", "eslint-config-next", "@next/*", "react", "react-dom", "@types/react", "@types/react-dom", "babel-plugin-react-compiler", "ai", "@ai-sdk/*", "@openrouter/*", "ai-sdk-provider-claude-code", "@modelcontextprotocol/*", "mcp-handler", "@supabase/*", "@tanstack/*", "@tiptap/*", "serwist", "@serwist/*", "drizzle-orm", "drizzle-kit", "postgres"]
       minor-and-patch:
         update-types: [minor, patch]
+        exclude-patterns: ["next", "eslint-config-next", "@next/*", "react", "react-dom", "@types/react", "@types/react-dom", "babel-plugin-react-compiler", "ai", "@ai-sdk/*", "@openrouter/*", "ai-sdk-provider-claude-code", "@modelcontextprotocol/*", "mcp-handler", "@supabase/*", "@tanstack/*", "@tiptap/*", "serwist", "@serwist/*", "drizzle-orm", "drizzle-kit", "postgres"]
+    ignore:
+      # Types must match the runtime (Node 22, .nvmrc): only take @types/node majors with a Node upgrade.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
