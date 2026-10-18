@@ -71,5 +71,9 @@ function run(argv) {
   const json = $.NSString.alloc.initWithUTF8String(JSON.stringify(out));
   const ok = json.writeToFileAtomicallyEncodingError(outFile, true, $.NSUTF8StringEncoding, null);
   if (!ok) throw new Error("Could not write " + outFile);
-  return JSON.stringify({ notes: out.length, locked: out.filter((n) => n.locked).length, errors, file: outFile });
+  // Summary for the caller (the export file itself can exceed V8's max string length, so the caller
+  // must not have to read it back to report counts).
+  const byFolder = {};
+  for (const n of out) byFolder[n.folder] = (byFolder[n.folder] || 0) + 1;
+  return JSON.stringify({ notes: out.length, locked: out.filter((n) => n.locked).length, byFolder, errors, file: outFile });
 }

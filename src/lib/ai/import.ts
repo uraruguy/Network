@@ -1,6 +1,85 @@
 import { generateText, Output } from "ai";
 import { aiFastModel, aiModel } from "./provider";
 import { classificationSchema, extractionSchema, type Classification, type Extraction } from "./import-schemas";
+import { z } from "zod";
+import { CandidateV2, ExtractionV2Model, ScreenResult, EXTRACTION_VERSION, type ExtractionV2, type ScreenItem } from "@/lib/import/contracts";
+import { mergeChunkCandidates } from "@/lib/import/merge";
+import { IMPORT_SYSTEM } from "./prompts/system";
+import { screenPrompt } from "./prompts/screen";
+import { chunkNote, extractPrompt } from "./prompts/extract";
+
+/* ------------------------------------------------------------------ */
+/*  v2 pipeline (scripts/import/run-stage.ts)                          */
+/* ------------------------------------------------------------------ */
+
+/** Screens up to ~10 notes in one call on their full text (≤8k chars each). */
+export async function screenBatch(items: { id: string; title: string | null; text: string; folders: string[] }[]): Promise<ScreenItem[]> {
+  const { output } = await generateText({
+    model: await aiFastModel(),
+    system: IMPORT_SYSTEM,
+    output: Output.object({ schema: ScreenResult, name: "screen" }),
+    maxOutputTokens: 4000,
+    prompt: screenPrompt(items),
+  });
+  return output.items;
+}
+
+/**
+ * Structured outputs on the Anthropic API (direct or via OpenRouter) reject schemas with more than
+ * 16 nullable/union parameters; the full v2 schema has 17. The compact variant drops three rarely
+ * filled fields (they come back as null) so API-key providers can run the extraction.
+ */
+const COMPACT_OMIT = { introducedBy: true, whatICanAsk: true, metCity: true } as const;
+const ExtractionV2Compact = ExtractionV2Model.extend({ candidates: z.array(CandidateV2.omit(COMPACT_OMIT)) });
+
+/**
+ * Extraction v2. Notes longer than the chunk size are split at headings/blank lines and merged by name.
+ * `tier: "fast"` uses the fast model; `compact` uses the reduced schema (the in-app quick import
+ * sets both for short notes on API-key providers).
+ */
+export async function extractNoteV2(input: {
+  title: string | null;
+  text: string;
+  created: string | null;
+  folders: string[];
+  existingNames: string[];
+  mode: "full" | "journal";
+  tier?: "main" | "fast";
+  compact?: boolean;
+}): Promise<ExtractionV2> {
+  const { tier = "main", compact = false, ...promptInput } = input;
+  const chunks = chunkNote(promptInput.text);
+  const parts = [];
+  for (let i = 0; i < chunks.length; i++) {
+    const call = {
+      model: tier === "fast" ? await aiFastModel() : await aiModel(),
+      system: IMPORT_SYSTEM,
+      maxOutputTokens: 16000,
+      prompt: extractPrompt({ ...promptInput, text: chunks[i]!, chunk: chunks.length > 1 ? { index: i, total: chunks.length } : undefined }),
+    };
+    if (compact) {
+      const { output } = await generateText({ ...call, output: Output.object({ schema: ExtractionV2Compact, name: "extraction" }) });
+      parts.push({ ...output, candidates: output.candidates.map((c) => ({ ...c, introducedBy: null, whatICanAsk: null, metCity: null })) });
+    } else {
+      const { output } = await generateText({ ...call, output: Output.object({ schema: ExtractionV2Model, name: "extraction" }) });
+      parts.push(output);
+    }
+  }
+  const first = parts[0]!;
+  return {
+    version: EXTRACTION_VERSION,
+    noteSummary: parts.map((p) => p.noteSummary).join(" ").slice(0, 1200),
+    suggestedTitle: first.suggestedTitle,
+    occurredAt: parts.find((p) => p.occurredAt)?.occurredAt ?? null,
+    candidates: mergeChunkCandidates(parts.map((p) => p.candidates)),
+    chunks: chunks.length,
+    mode: promptInput.mode,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/*  v1 (in-app import flow)                                            */
+/* ------------------------------------------------------------------ */
 
 const SYSTEM = `You help Jakob (20, founder from Ljubljana, Slovenia; often in Berlin and San Francisco) organise his personal network.
 His notes are written in colloquial Slovenian (Gorenjska dialect) mixed with English. Read both fluently.

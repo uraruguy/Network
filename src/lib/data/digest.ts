@@ -1,67 +1,162 @@
+import "server-only";
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import { clientEnv } from "@/lib/env";
-import { digestHtml, digestSubject } from "@/lib/email/digest";
-import { emailConfigured, sendEmail } from "@/lib/email/send";
-import { listReminders } from "./reminders";
+import { getEmailTransport } from "@/lib/email";
+import { digestHtml, digestSubject, digestText, type DigestBirthday } from "@/lib/email/digest";
+import { DECISION_LABEL, digestDecision, hasDigestContent, upcomingBirthdays } from "@/lib/email/digest-plan";
+import { localDate, safeTimeZone } from "@/lib/time/zoned";
+import { listReminders, type ReminderWithPerson } from "./reminders";
 
 const { profiles, reminders, people } = schema;
 
-function localParts(now: Date, timeZone: string) {
-  const fmt = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hour12: false });
-  const parts = Object.fromEntries(fmt.formatToParts(now).map((p) => [p.type, p.value]));
-  return { date: `${parts.year}-${parts.month}-${parts.day}`, hour: Number(parts.hour === "24" ? 0 : parts.hour) };
+type Profile = typeof profiles.$inferSelect;
+
+export type DigestResult = { email: string; sent: boolean; reason?: string; count?: number; html?: string };
+
+export type DigestContent = {
+  today: string;
+  timeZone: string;
+  due: ReminderWithPerson[];
+  overdue: ReminderWithPerson[];
+  birthdays: DigestBirthday[];
+  subject: string;
+  html: string;
+  text: string;
+};
+
+/**
+ * Start/end of the local day `today` in `timeZone`, computed by Postgres so the digest agrees with
+ * every other "today" query (and DST days are 23/25 hours long).
+ */
+async function dayBounds(today: string, timeZone: string): Promise<{ start: Date; end: Date }> {
+  const [row] = await db.execute<{ start: Date | string; end: Date | string }>(
+    sql`select (${today}::date)::timestamp at time zone ${timeZone} as "start", (${today}::date + 1)::timestamp at time zone ${timeZone} as "end"`,
+  );
+  return { start: new Date(row!.start), end: new Date(row!.end) };
+}
+
+/** Everything the digest for `profile` on its local `today` contains. Read-only. */
+export async function buildDigest(profile: Profile, today: string, timeZone: string, now: Date): Promise<DigestContent> {
+  const { start, end } = await dayBounds(today, timeZone);
+  // Open reminders due before the end of today (listReminders' `until` is inclusive).
+  const open = await listReminders(profile.id, { until: new Date(end.getTime() - 1) });
+  const overdue = open.filter((r) => new Date(r.dueAt) < start);
+  const due = open.filter((r) => new Date(r.dueAt) >= start);
+
+  const withBirthdays = await db.query.people.findMany({
+    where: and(eq(people.ownerId, profile.id), isNull(people.deletedAt), sql`${people.birthday} is not null`),
+    columns: { id: true, displayName: true, birthday: true },
+  });
+  const birthdays: DigestBirthday[] = upcomingBirthdays(withBirthdays, today, 7).map((b) => ({ id: b.id, displayName: b.displayName, birthday: b.birthday, inDays: b.inDays, turning: b.turning }));
+
+  const base = clientEnv.NEXT_PUBLIC_APP_URL;
+  const name = profile.displayName?.split(" ")[0] || "there";
+  const dateLabel = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone }).format(now);
+  const parts = { base, name, dateLabel, due, overdue, birthdays };
+  return { today, timeZone, due, overdue, birthdays, subject: digestSubject([...overdue, ...due], birthdays), html: digestHtml(parts), text: digestText(parts) };
 }
 
 /**
- * Sends the daily digest to every profile whose local time has passed their digest hour and who
- * hasn't received one today. Safe to call hourly (pg_cron / Vercel cron) or manually with force.
+ * Claims today's digest for a profile — atomically, so overlapping cron runs (pg_cron hourly +
+ * Vercel's daily cron) can't both send. Returns the previous value to roll back to if sending
+ * fails, or false when today's digest was already claimed. Net effect: `last_digest_on = today`
+ * only persists after a successful send.
  */
-export async function runDigest(opts: { force?: boolean; preview?: boolean; now?: Date } = {}) {
+async function claimDigest(profileId: string, today: string): Promise<{ previous: string | null } | false> {
+  const [before] = await db.select({ previous: profiles.lastDigestOn }).from(profiles).where(eq(profiles.id, profileId));
+  const rows = await db
+    .update(profiles)
+    .set({ lastDigestOn: today })
+    .where(and(eq(profiles.id, profileId), sql`${profiles.lastDigestOn} is distinct from ${today}::date`))
+    .returning({ id: profiles.id });
+  return rows.length ? { previous: before?.previous ?? null } : false;
+}
+
+/**
+ * Sends the daily digest to every profile whose local time has passed its digest hour and that
+ * hasn't had one today. Safe to call hourly (pg_cron / Vercel cron). `force` ignores the schedule
+ * and the once-a-day rule; `preview` renders without sending or changing anything.
+ */
+export async function runDigest(opts: { force?: boolean; preview?: boolean; now?: Date } = {}): Promise<DigestResult[]> {
   const now = opts.now ?? new Date();
-  const results: { email: string; sent: boolean; reason?: string; count?: number; html?: string }[] = [];
+  const results: DigestResult[] = [];
   const all = await db.query.profiles.findMany();
-  const base = clientEnv.NEXT_PUBLIC_APP_URL;
 
   for (const p of all) {
-    const { date: today, hour } = localParts(now, p.timezone);
-    if (!opts.force && !opts.preview) {
-      if (!p.digestEnabled) { results.push({ email: p.email, sent: false, reason: "disabled" }); continue; }
-      if (hour < p.digestHour) { results.push({ email: p.email, sent: false, reason: `before ${p.digestHour}:00 local` }); continue; }
-      const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(reminders).where(and(eq(reminders.ownerId, p.id), sql`(${reminders.sentAt} at time zone ${p.timezone})::date = ${today}::date`));
-      if (n > 0) { results.push({ email: p.email, sent: false, reason: "already sent today" }); continue; }
+    const decision = digestDecision(p, now, { force: opts.force || opts.preview });
+    if (!decision.send) {
+      results.push({ email: p.email, sent: false, reason: DECISION_LABEL[decision.reason] });
+      continue;
     }
-
-    const endOfToday = new Date(`${today}T23:59:59`);
-    const pending = await listReminders(p.id, { until: endOfToday });
-    const startOfToday = new Date(`${today}T00:00:00`);
-    const overdue = pending.filter((r) => new Date(r.dueAt) < startOfToday);
-    const due = pending.filter((r) => new Date(r.dueAt) >= startOfToday);
-
-    const bdays = await db.query.people.findMany({ where: and(eq(people.ownerId, p.id), isNull(people.deletedAt), sql`${people.birthday} is not null`), columns: { id: true, displayName: true, birthday: true } });
-    const y = Number(today.slice(0, 4));
-    const birthdays = bdays
-      .map((b) => {
-        const [, m, d] = b.birthday!.split("-").map(Number) as [number, number, number];
-        let next = new Date(y, m - 1, d);
-        const t0 = new Date(today + "T00:00:00");
-        if (next < t0) next = new Date(y + 1, m - 1, d);
-        const inDays = Math.round((next.getTime() - t0.getTime()) / 86_400_000);
-        return { id: b.id, displayName: b.displayName, birthday: b.birthday!, inDays };
-      })
-      .filter((b) => b.inDays <= 7)
-      .sort((a, b) => a.inDays - b.inDays);
-
-    const dateLabel = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: p.timezone }).format(now);
-    if (opts.preview) { results.push({ email: p.email, sent: false, reason: "preview", html: digestHtml({ base, name: p.displayName ?? "Jakob", dateLabel, due, overdue, birthdays }) }); continue; }
-    if (!due.length && !overdue.length && !birthdays.length) { results.push({ email: p.email, sent: false, reason: "nothing due" }); continue; }
-    if (!emailConfigured()) { results.push({ email: p.email, sent: false, reason: "RESEND_API_KEY missing", count: due.length + overdue.length }); continue; }
-
-    await sendEmail({ to: p.email, subject: digestSubject([...overdue, ...due], birthdays), html: digestHtml({ base, name: p.displayName ?? "Jakob", dateLabel, due, overdue, birthdays }) });
-    const ids = [...due, ...overdue].map((r) => r.id);
-    if (ids.length) await db.update(reminders).set({ sentAt: now, status: sql`case when ${reminders.status} = 'pending' then 'sent'::reminder_status else ${reminders.status} end` }).where(and(inArray(reminders.id, ids), or(eq(reminders.status, "pending"), eq(reminders.status, "snoozed"), eq(reminders.status, "sent"))));
+    const content = await buildDigest(p, decision.today, decision.timeZone, now);
+    if (opts.preview) {
+      results.push({ email: p.email, sent: false, reason: "preview", html: content.html });
+      continue;
+    }
+    const count = content.due.length + content.overdue.length;
+    if (!hasDigestContent(content)) {
+      results.push({ email: p.email, sent: false, reason: "nothing due" });
+      continue;
+    }
+    const transport = await getEmailTransport(p.id);
+    if (!transport) {
+      results.push({ email: p.email, sent: false, reason: "e-mail not configured", count });
+      continue;
+    }
+    const claim = opts.force ? { previous: p.lastDigestOn } : await claimDigest(p.id, decision.today);
+    if (!claim) {
+      results.push({ email: p.email, sent: false, reason: DECISION_LABEL.already_sent });
+      continue;
+    }
+    try {
+      await transport.send({ to: p.email, subject: content.subject, html: content.html, text: content.text });
+    } catch (err) {
+      if (!opts.force) await db.update(profiles).set({ lastDigestOn: claim.previous }).where(eq(profiles.id, p.id));
+      console.error("digest send failed", err);
+      results.push({ email: p.email, sent: false, reason: `send failed: ${(err as Error).message}`.slice(0, 300), count });
+      continue;
+    }
+    if (opts.force) await db.update(profiles).set({ lastDigestOn: decision.today }).where(eq(profiles.id, p.id));
+    const ids = [...content.due, ...content.overdue].map((r) => r.id);
+    if (ids.length) {
+      await db
+        .update(reminders)
+        .set({ sentAt: now, status: sql`case when ${reminders.status} = 'pending' then 'sent'::reminder_status else ${reminders.status} end` })
+        .where(and(inArray(reminders.id, ids), or(eq(reminders.status, "pending"), eq(reminders.status, "snoozed"), eq(reminders.status, "sent"))));
+    }
     results.push({ email: p.email, sent: true, count: ids.length });
   }
   return results;
 }
 
+async function ownerProfile(ownerId: string): Promise<Profile | null> {
+  return (await db.query.profiles.findFirst({ where: eq(profiles.id, ownerId) })) ?? null;
+}
+
+/** Today's digest for one owner, rendered but not sent (Settings → Daily digest → Preview). */
+export async function renderDigestPreview(ownerId: string, now = new Date()): Promise<DigestContent | null> {
+  const p = await ownerProfile(ownerId);
+  if (!p) return null;
+  const timeZone = safeTimeZone(p.timezone);
+  return buildDigest(p, localDate(now, timeZone), timeZone, now);
+}
+
+/**
+ * E-mails today's digest to the owner as a preview. Doesn't mark reminders as sent and doesn't
+ * count as today's digest.
+ */
+export async function sendDigestPreview(ownerId: string, now = new Date()): Promise<{ ok: boolean; to?: string; error?: string }> {
+  const p = await ownerProfile(ownerId);
+  if (!p) return { ok: false, error: "No profile" };
+  const transport = await getEmailTransport(ownerId);
+  if (!transport) return { ok: false, error: "E-mail isn't configured yet (Settings → Connections)." };
+  const timeZone = safeTimeZone(p.timezone);
+  const content = await buildDigest(p, localDate(now, timeZone), timeZone, now);
+  try {
+    await transport.send({ to: p.email, subject: `Preview · ${content.subject}`, html: content.html, text: content.text });
+    return { ok: true, to: p.email };
+  } catch (err) {
+    return { ok: false, to: p.email, error: (err as Error).message.slice(0, 300) };
+  }
+}

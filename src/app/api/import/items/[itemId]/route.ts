@@ -1,6 +1,11 @@
 import { z } from "zod";
-import { withOwner, parseBody } from "@/lib/api-server";
+import { withOwner, parseBody, notFound } from "@/lib/api-server";
+import { db } from "@/lib/db";
 import { commitItem, decisionSchema, reopenItem, skipItem } from "@/lib/data/import";
+import { getImportItem } from "@/lib/data/import-review";
+
+/** One import item with its note body and resolved mentions. */
+export const GET = withOwner<{ itemId: string }>(async ({ ownerId, params }) => (await getImportItem(db, ownerId, params.itemId)) ?? notFound());
 
 const body = z.discriminatedUnion("action", [
   z.object({ action: z.literal("commit"), decision: decisionSchema }),

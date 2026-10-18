@@ -1,0 +1,475 @@
+[
+  {
+    "id": "fixture://note/01",
+    "title": "Kava z Blažem",
+    "folder": "Blaž",
+    "daysAgo": 20,
+    "classification": "meeting",
+    "text": "Kava z Blažem v Ljubljani.\nBlaž je reku, da booking engine za Goolets končno dela. Rad bi, da pogledam onboarding.\n\nNa koncu je prišla še Kaja, s Kajo sva se zmenila za nov dizajn.",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Kava z Blažem o booking enginu, Kaja se pridruži.",
+      "occurredAt": null,
+      "candidates": [
+        { "name": "Blaž", "surfaces": ["Blažem", "Blaž"], "gender": "m", "salience": 0.9, "company": "Goolets", "city": "Ljubljana", "categories": ["partner"], "keyFacts": ["Booking engine za Goolets dela"], "excerpt": "Blaž je reku, da booking engine za Goolets končno dela. Rad bi, da pogledam onboarding.", "confidence": 0.85 },
+        { "name": "Kaja", "surfaces": ["Kaja", "Kajo"], "gender": "f", "salience": 0.3, "keyFacts": ["Dela nov dizajn"], "confidence": 0.7 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/02",
+    "title": "Blaž - ideje za booking",
+    "folder": "Blaž",
+    "daysAgo": 200,
+    "classification": "person",
+    "text": "Blaž ima idejo za dinamične cene na Goolets.\n- sezonske cene\n- last minute popusti\nRekel je, da bo pripravil prototip do konca meseca.",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Blaževe ideje za cene na Goolets.",
+      "candidates": [
+        { "name": "Blaž", "surfaces": ["Blaž"], "gender": "m", "salience": 1, "company": "Goolets", "role": "CTO", "categories": ["partner"], "keyFacts": ["Ideja: dinamične cene na Goolets"], "confidence": 0.8 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/03",
+    "title": "Padel petek",
+    "folder": "Blaž",
+    "daysAgo": 40,
+    "classification": "meeting",
+    "text": "Padel z Blažem in Miho. Miha igra zelo agresivno.\nZmagala sva z Blažem 6:4.",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Padel z Blažem in Miho.",
+      "candidates": [
+        { "name": "Blaž", "surfaces": ["Blažem"], "gender": "m", "salience": 0.6, "activities": ["padel"], "confidence": 0.8 },
+        { "name": "Miha", "surfaces": ["Miho", "Miha"], "gender": "m", "salience": 0.5, "activities": ["padel"], "keyFacts": ["Igra padel zelo agresivno"], "confidence": 0.7 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/04",
+    "title": "Goolets sync 3.9.2026",
+    "folder": "Meeting Notes",
+    "daysAgo": 45,
+    "classification": "meeting",
+    "text": "Goolets sync z Blaž Novak in Kaja Horvat.\nBlaž Novak: booking engine, integracija z Bolt.\nKaja Horvat: nov landing page, rok 20.9.\nNaslednji sync čez 2 tedna.",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Goolets sync: booking engine in landing page.",
+      "occurredAt": "2026-09-03",
+      "candidates": [
+        { "name": "Blaž Novak", "surfaces": ["Blaž Novak"], "gender": "m", "salience": 0.6, "role": "CTO", "company": "Goolets", "categories": ["partner"], "keyFacts": ["Vodi booking engine"], "excerpt": "Blaž Novak: booking engine, integracija z Bolt.", "confidence": 0.95 },
+        { "name": "Kaja Horvat", "surfaces": ["Kaja Horvat"], "gender": "f", "salience": 0.5, "role": "Designer", "company": "Goolets", "categories": ["partner"], "keyFacts": ["Dela landing page za Goolets"], "excerpt": "Kaja Horvat: nov landing page, rok 20.9.", "confidence": 0.95 },
+        { "name": "Bolt", "surfaces": ["Bolt"], "salience": 0.1, "confidence": 0.3 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/05",
+    "title": "SF hackathon",
+    "folder": "SF",
+    "daysAgo": 400,
+    "classification": "meeting",
+    "text": "Hackathon v San Franciscu. V ekipi z Blaž Kranjc (robotika, Stanford) in Matt Fisher.\nShawn Pana je bil v žiriji.\nBlaž Kranjc je rekel, da se vrne v Ljubljano čez eno leto.",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Hackathon v SF z Blažem Kranjcem in Mattom Fisherjem.",
+      "candidates": [
+        { "name": "Blaž Kranjc", "surfaces": ["Blaž Kranjc"], "gender": "m", "salience": 0.6, "role": "Robotics researcher", "company": "Stanford", "city": "San Francisco", "metContext": "Hackathon v SF", "categories": ["founder"], "activities": ["robotics"], "keyFacts": ["Robotika na Stanfordu", "Namerava se vrniti v Ljubljano"], "confidence": 0.95 },
+        { "name": "Matt Fisher", "surfaces": ["Matt Fisher"], "gender": "m", "salience": 0.5, "city": "San Francisco", "metContext": "Hackathon v SF", "categories": ["founder"], "confidence": 0.9 },
+        { "name": "Shawn Pana", "surfaces": ["Shawn Pana"], "gender": "m", "salience": 0.2, "keyFacts": ["Žirija na SF hackathonu"], "confidence": 0.8 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/06",
+    "title": "Večerja v SF",
+    "folder": "SF",
+    "daysAgo": 395,
+    "classification": "meeting",
+    "text": "Večerja v Mission. Matt je povedal o svojem novem startupu. Blaž je razlagal o robotiki.\nAlex Chen je pokazal, kako ocenjujejo seed runde.",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Večerja z Mattom, Blažem in Alexom Chenom.",
+      "candidates": [
+        { "name": "Matt", "surfaces": ["Matt"], "gender": "m", "salience": 0.5, "keyFacts": ["Nov startup"], "confidence": 0.7 },
+        { "name": "Blaž", "surfaces": ["Blaž"], "gender": "m", "salience": 0.5, "activities": ["robotics"], "confidence": 0.7 },
+        { "name": "Alex Chen", "surfaces": ["Alex Chen"], "gender": "m", "salience": 0.5, "categories": ["investor"], "keyFacts": ["Ocenjuje seed runde"], "confidence": 0.9 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/07",
+    "title": "Kaja - feedback na dizajn",
+    "folder": "Kaja",
+    "daysAgo": 30,
+    "classification": "person",
+    "text": "Kaja želi več feedbacka na dizajn. Rekla je, da ji paše delati od doma ob petkih.\nMoram ji poslati komentarje.",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Kaja želi več feedbacka.",
+      "candidates": [
+        { "name": "Kaja", "surfaces": ["Kaja"], "gender": "f", "salience": 1, "keyFacts": ["Ob petkih dela od doma"], "followUps": [{ "what": "Poslati Kaji komentarje na dizajn", "when": null, "explicitDate": null }], "confidence": 0.8 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/08",
+    "title": "Jana Kos - investicija",
+    "folder": "Meeting Notes",
+    "daysAgo": 25,
+    "classification": "person",
+    "text": "Jana Kos je angel investitorka, vlaga v SaaS v regiji.\nZanima jo Goolets. Rekla je, naj ji pošljem deck do 1.12.2026.",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Jana Kos, angel investitorka, želi deck.",
+      "candidates": [
+        { "name": "Jana Kos", "surfaces": ["Jana Kos"], "gender": "f", "salience": 1, "role": "Angel investor", "city": "Ljubljana", "categories": ["investor"], "keyFacts": ["Vlaga v SaaS v regiji", "Zanima jo Goolets"], "followUps": [{ "what": "Poslati Jani deck", "when": "do 1.12.2026", "explicitDate": "2026-12-01" }], "confidence": 0.95 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/09",
+    "title": "Kava z Jano",
+    "folder": "Notes",
+    "daysAgo": 100,
+    "classification": "person",
+    "text": "Kava z Jano. Jana je rekla, da trenutno ne vlaga v hardware, samo SaaS.",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Jana vlaga samo v SaaS.",
+      "candidates": [
+        { "name": "Jana", "surfaces": ["Jano", "Jana"], "gender": "f", "salience": 1, "categories": ["investor"], "keyFacts": ["Ne vlaga v hardware"], "confidence": 0.75 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/10",
+    "title": "Jani rojstni dan",
+    "folder": "Notes",
+    "daysAgo": 300,
+    "classification": "person",
+    "text": "Jani je imel rojstni dan na Bledu. Janiju sem kupil knjigo o teku na smučeh.\nJani je reku, da gre pozimi na Pokljuko.",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Janijev rojstni dan na Bledu.",
+      "candidates": [
+        { "name": "Jani", "surfaces": ["Jani", "Janiju"], "gender": "m", "salience": 1, "city": "Bled", "categories": ["friend"], "activities": ["cross-country skiing"], "keyFacts": ["Rojstni dan praznuje na Bledu"], "confidence": 0.75 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/11",
+    "title": "Tek na smučeh z Janijem",
+    "folder": "Notes",
+    "daysAgo": 60,
+    "classification": "meeting",
+    "text": "Tek na smučeh na Pokljuki z Janijem. Jani Zupan je v odlični formi, trenira za Planiški maraton.",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Tek na smučeh z Janijem Zupanom.",
+      "candidates": [
+        { "name": "Jani Zupan", "surfaces": ["Janijem", "Jani Zupan"], "gender": "m", "salience": 1, "categories": ["friend"], "activities": ["cross-country skiing"], "keyFacts": ["Trenira za Planiški maraton"], "confidence": 0.95 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/12",
+    "title": "Padel z Miho",
+    "folder": "Notes",
+    "daysAgo": 15,
+    "classification": "meeting",
+    "text": "Padel z Miho Golobom v Tivoliju. Miha Golob je predlagal turnir v novembru.",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Padel z Mihom Golobom.",
+      "candidates": [
+        { "name": "Miha Golob", "surfaces": ["Miho Golobom", "Miha Golob"], "gender": "m", "salience": 1, "city": "Ljubljana", "categories": ["friend"], "activities": ["padel"], "keyFacts": ["Predlagal padel turnir v novembru"], "confidence": 0.95 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/13",
+    "title": "Berlin trip",
+    "folder": "Notes",
+    "daysAgo": 500,
+    "classification": "meeting",
+    "text": "Berlin: srečal Miha iz Berlina, dela fintech startup. Lars je prišel iz Hamburga na pivo.",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Berlin: Miha (fintech) in Lars.",
+      "candidates": [
+        { "name": "Miha", "surfaces": ["Miha"], "gender": "m", "salience": 0.6, "city": "Berlin", "categories": ["founder"], "keyFacts": ["Fintech startup v Berlinu"], "confidence": 0.6 },
+        { "name": "Lars", "surfaces": ["Lars"], "gender": "m", "salience": 0.4, "city": "Hamburg", "confidence": 0.6 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/14",
+    "title": "Peter",
+    "folder": "Peter",
+    "daysAgo": 700,
+    "classification": "person",
+    "text": "Peter mi je svetoval, naj se fokusiram na eno stranko naenkrat. Dober mentor.",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Peterjev nasvet.",
+      "candidates": [
+        { "name": "Peter", "surfaces": ["Peter"], "gender": "m", "salience": 1, "categories": ["mentor"], "keyFacts": ["Svetuje fokus na eno stranko"], "confidence": 0.8 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/15",
+    "title": "Peter - mentorstvo",
+    "folder": "Peter",
+    "daysAgo": 650,
+    "classification": "person",
+    "text": "Mentorstvo s Petrom Rozmanom. Peter Rozman je vodil prodajo v treh SaaS podjetjih.\nDogovor: mesečni klic.",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Mentorstvo s Petrom Rozmanom.",
+      "candidates": [
+        { "name": "Peter Rozman", "surfaces": ["Petrom Rozmanom", "Peter Rozman"], "gender": "m", "salience": 1, "role": "Sales leader", "categories": ["mentor"], "keyFacts": ["Vodil prodajo v treh SaaS podjetjih", "Mesečni mentorski klic"], "confidence": 0.95 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/16",
+    "title": "Matt Fisher - intro",
+    "folder": "SF",
+    "daysAgo": 10,
+    "classification": "person",
+    "text": "Matt Fisher išče CTO za nov startup. Lahko ga predstavim Alexu Chenu.\nTodo: intro z Alexom.",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Matt išče CTO-ja.",
+      "candidates": [
+        { "name": "Matt Fisher", "surfaces": ["Matt Fisher"], "gender": "m", "salience": 1, "city": "San Francisco", "categories": ["founder"], "keyFacts": ["Išče CTO-ja"], "howICanHelp": "Intro z Alexom Chenom", "followUps": [{ "what": "Intro Matt ↔ Alex Chen", "when": null, "explicitDate": null }], "confidence": 0.95 },
+        { "name": "Alex Chen", "surfaces": ["Alexu Chenu", "Alexom"], "gender": "m", "salience": 0.3, "categories": ["investor"], "confidence": 0.8 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/17",
+    "title": "Aleks - kava",
+    "folder": "Notes",
+    "daysAgo": 90,
+    "classification": "person",
+    "text": "Kava z Aleks Vidmar na FRI. Aleks dela na ML za medicino.",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Aleks Vidmar, ML za medicino.",
+      "candidates": [
+        { "name": "Aleks Vidmar", "surfaces": ["Aleks Vidmar", "Aleks"], "gender": "m", "salience": 1, "role": "ML researcher", "company": "FRI", "city": "Ljubljana", "categories": ["acquaint"], "keyFacts": ["ML za medicino"], "confidence": 0.95 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/18",
+    "title": "Alex Chen - fund",
+    "folder": "SF",
+    "daysAgo": 380,
+    "classification": "person",
+    "text": "Alex Chen, partner pri Northbeam Ventures. Vlaga v pre-seed B2B. https://northbeam.example.com",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Alex Chen, Northbeam Ventures.",
+      "candidates": [
+        { "name": "Alex Chen", "surfaces": ["Alex Chen"], "gender": "m", "salience": 1, "role": "Partner", "company": "Northbeam Ventures", "city": "San Francisco", "country": "USA", "categories": ["investor"], "keyFacts": ["Vlaga v pre-seed B2B"], "links": ["https://northbeam.example.com"], "confidence": 0.95 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/19",
+    "title": "Erasmus Hamburg",
+    "folder": "Business",
+    "daysAgo": 420,
+    "classification": "person",
+    "text": "Lars Petersen bi bil host za Erasmus for Young Entrepreneurs v Hamburgu.\nČez 2 tedna pokliči Larsa glede papirjev.",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Lars Petersen, Erasmus host.",
+      "candidates": [
+        { "name": "Lars Petersen", "surfaces": ["Lars Petersen", "Larsa"], "gender": "m", "salience": 1, "city": "Hamburg", "country": "Germany", "categories": ["mentor"], "keyFacts": ["Host za Erasmus for Young Entrepreneurs"], "followUps": [{ "what": "Poklicati Larsa glede papirjev", "when": "čez 2 tedna", "explicitDate": null }], "confidence": 0.95 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/20",
+    "title": "Call z Davidom Rekarjem",
+    "folder": "Meeting Notes",
+    "daysAgo": 50,
+    "classification": "meeting",
+    "text": "Call z Davidom Rekarjem iz Kovačnice. David Rekar bi pomagal pri pilotu z mestom.",
+    "extraction": {
+      "version": 1,
+      "noteSummary": "David Rekar, pilot z mestom.",
+      "occurredAt": null,
+      "candidates": [
+        { "name": "David Rekar", "aliases": ["David"], "role": null, "company": "Kovačnica", "city": "Ljubljana", "country": "Slovenia", "metCity": null, "metDate": null, "metContext": null, "links": [], "circle": null, "warmth": null, "categories": ["mentor"], "hobbies": [], "keyFacts": ["Pomaga pri pilotu z mestom"], "followUps": [], "howICanHelp": null, "whatICanAsk": "Pilot z mestom", "introducedBy": null, "confidence": 0.9, "matchName": null, "matchPersonId": null }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/21",
+    "title": "Kosilo z ekipo",
+    "folder": "Notes",
+    "daysAgo": 35,
+    "classification": "meeting",
+    "text": "Kosilo z ekipo. Jakob je plačal, natakar Marko je bil prijazen. Kaja je predlagala team building.",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Kosilo z ekipo.",
+      "candidates": [
+        { "name": "Jakob", "surfaces": ["Jakob"], "gender": "m", "salience": 0.3, "confidence": 0.5 },
+        { "name": "Marko", "surfaces": ["Marko"], "gender": "m", "salience": 0.1, "role": "Natakar", "confidence": 0.4 },
+        { "name": "Kaja", "surfaces": ["Kaja"], "gender": "f", "salience": 0.5, "keyFacts": ["Predlagala team building"], "confidence": 0.7 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/22",
+    "title": "Potencialni mentorji",
+    "folder": "Goals",
+    "daysAgo": 120,
+    "classification": "list",
+    "text": "Potencialni mentorji:\n- Peter Rozman – prodaja, SaaS\n- Tina Lešnik – VC, Sava Capital\n- Gregor Bizjak – founder, prodal startup 2022\n- Alex Chen – investor SF",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Seznam potencialnih mentorjev.",
+      "candidates": [
+        { "name": "Peter Rozman", "surfaces": ["Peter Rozman"], "gender": "m", "salience": 0.4, "categories": ["mentor"], "excerpt": "- Peter Rozman – prodaja, SaaS", "confidence": 0.9 },
+        { "name": "Tina Lešnik", "surfaces": ["Tina Lešnik"], "gender": "f", "salience": 0.4, "company": "Sava Capital", "categories": ["investor", "mentor"], "excerpt": "- Tina Lešnik – VC, Sava Capital", "confidence": 0.9 },
+        { "name": "Gregor Bizjak", "surfaces": ["Gregor Bizjak"], "gender": "m", "salience": 0.4, "categories": ["founder", "mentor"], "keyFacts": ["Prodal startup 2022"], "excerpt": "- Gregor Bizjak – founder, prodal startup 2022", "confidence": 0.9 },
+        { "name": "Alex Chen", "surfaces": ["Alex Chen"], "gender": "m", "salience": 0.4, "categories": ["investor"], "excerpt": "- Alex Chen – investor SF", "confidence": 0.9 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/23",
+    "title": "Dnevno dogajanje 12.10.2026",
+    "folder": "Dnevno dogajanje",
+    "daysAgo": 5,
+    "classification": "journal",
+    "text": "Zjutraj tek. Popoldne delo na Goolets.\nJani je klical, gre na Pokljuko v soboto.\nKaja je poslala nove mockupe.\nZvečer padel z Miho Golobom.",
+    "extraction": {
+      "version": 2,
+      "mode": "journal",
+      "noteSummary": "Dnevnik 12.10.",
+      "occurredAt": "2026-10-12",
+      "candidates": [
+        { "name": "Jani", "surfaces": ["Jani"], "gender": "m", "salience": 0.3, "excerpt": "Jani je klical, gre na Pokljuko v soboto.", "confidence": 0.7 },
+        { "name": "Kaja", "surfaces": ["Kaja"], "gender": "f", "salience": 0.3, "excerpt": "Kaja je poslala nove mockupe.", "confidence": 0.7 },
+        { "name": "Miha Golob", "surfaces": ["Miho Golobom"], "gender": "m", "salience": 0.3, "activities": ["padel"], "excerpt": "Zvečer padel z Miho Golobom.", "confidence": 0.9 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/24",
+    "title": "Tina Lešnik - VC",
+    "folder": "Meeting Notes",
+    "daysAgo": 110,
+    "classification": "person",
+    "text": "Tina Lešnik, partnerica pri Sava Capital. Zanimajo jo marketplace modeli.",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Tina Lešnik, Sava Capital.",
+      "candidates": [
+        { "name": "Tina Lešnik", "surfaces": ["Tina Lešnik"], "gender": "f", "salience": 1, "role": "Partner", "company": "Sava Capital", "categories": ["investor"], "keyFacts": ["Zanimajo jo marketplace modeli"], "confidence": 0.95 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/25",
+    "title": "Razno 2025",
+    "folder": "Razno",
+    "daysAgo": 330,
+    "classification": "person",
+    "rescued": true,
+    "text": "Seznam knjig, ideje za vikend, recept za palačinke, filmi za pogledat, nakupovalni seznam za izlet, nekaj misli o produktivnosti, citati iz podcastov, opomniki za avto.\n\nNa koncu: spoznal Urška Mlakar na konferenci, dela UX raziskave za banke. Odlična sogovornica.",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Razno, na koncu Urška Mlakar.",
+      "candidates": [
+        { "name": "Urška Mlakar", "surfaces": ["Urška Mlakar"], "gender": "f", "salience": 0.8, "role": "UX researcher", "metContext": "Konferenca", "categories": ["acquaint"], "keyFacts": ["UX raziskave za banke"], "confidence": 0.9 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/26",
+    "title": "Gregor - ideja",
+    "folder": "Notes",
+    "daysAgo": 115,
+    "classification": "person",
+    "text": "Gregor je predlagal, da Goolets proda white-label verzijo. Rekel je, da je to naredil s svojim startupom pred prodajo.",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Gregor predlaga white-label.",
+      "candidates": [
+        { "name": "Gregor", "surfaces": ["Gregor"], "gender": "m", "salience": 1, "categories": ["mentor"], "keyFacts": ["Predlaga white-label za Goolets"], "confidence": 0.7 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/27",
+    "title": "Blaž SF robotika",
+    "folder": "SF",
+    "daysAgo": 390,
+    "classification": "person",
+    "text": "Blaž mi je pokazal robotsko roko v laboratoriju na Stanfordu. Blaž rad pleza.",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Blaž, robotika na Stanfordu.",
+      "candidates": [
+        { "name": "Blaž", "surfaces": ["Blaž"], "gender": "m", "salience": 1, "company": "Stanford", "city": "San Francisco", "activities": ["climbing", "robotics"], "keyFacts": ["Robotska roka v laboratoriju"], "confidence": 0.75 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/28",
+    "title": "Lars obisk Ljubljana",
+    "folder": "Notes",
+    "daysAgo": 380,
+    "classification": "person",
+    "text": "Lars je bil na obisku v Ljubljani. Peljal sem ga na Šmarno goro. Larsu je bilo zelo všeč.",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Lars na obisku.",
+      "candidates": [
+        { "name": "Lars", "surfaces": ["Lars", "Larsu"], "gender": "m", "salience": 1, "activities": ["hiking"], "confidence": 0.7 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/29",
+    "title": "Kaja rojstni dan",
+    "folder": "Kaja",
+    "daysAgo": 360,
+    "classification": "person",
+    "text": "Kaja ima rojstni dan 14. novembra. Rada ima keramiko.",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Kajin rojstni dan.",
+      "candidates": [
+        { "name": "Kaja", "surfaces": ["Kaja"], "gender": "f", "salience": 1, "activities": ["ceramics"], "keyFacts": ["Rojstni dan 14. novembra"], "confidence": 0.75 }
+      ]
+    }
+  },
+  {
+    "id": "fixture://note/30",
+    "title": "Matt call",
+    "folder": "SF",
+    "daysAgo": 8,
+    "classification": "person",
+    "text": "Call z Mattom. Startup gre v YC batch. Pošlji mu deck čez 2 tedna.",
+    "extraction": {
+      "version": 2,
+      "noteSummary": "Matt gre v YC.",
+      "candidates": [
+        { "name": "Matt", "surfaces": ["Mattom"], "gender": "m", "salience": 1, "keyFacts": ["Startup gre v YC batch"], "followUps": [{ "what": "Poslati Mattu deck", "when": "čez 2 tedna", "explicitDate": null }], "confidence": 0.75 }
+      ]
+    }
+  }
+]

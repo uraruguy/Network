@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CIRCLES, HOBBIES, WARMTH } from "@/lib/db/schema";
+import { CIRCLES, HOBBIES, WARMTH } from "@/lib/constants";
 
 export const classificationSchema = z.object({
   items: z.array(

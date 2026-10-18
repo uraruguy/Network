@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { SerwistProvider } from "@serwist/next/react";
 import "./globals.css";
 import { Providers } from "@/components/providers";
+import { headInlineScript } from "@/lib/security/inline-scripts";
 
 const APP_NAME = "The Network";
 
@@ -12,6 +13,8 @@ export const metadata: Metadata = {
   manifest: "/manifest.webmanifest",
   appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: APP_NAME },
   formatDetection: { telephone: false },
+  // Private app: keep every page out of search indexes (robots.txt + X-Robots-Tag say the same).
+  robots: { index: false, follow: false },
   icons: {
     icon: [{ url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
     apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
@@ -20,8 +23,9 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f4fbfb" },
-    { media: "(prefers-color-scheme: dark)", color: "#061516" },
+    // Canvas colour (--bg) per scheme; ThemeSync pins both when the user overrides the OS.
+    { media: "(prefers-color-scheme: light)", color: "#f7fbfb" },
+    { media: "(prefers-color-scheme: dark)", color: "#070f10" },
   ],
   width: "device-width",
   initialScale: 1,
@@ -29,18 +33,15 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
-// Applies .dark before first paint; honours a saved override.
-const themeScript = `(function(){try{var t=localStorage.getItem('theme');var d=t?t==='dark':matchMedia('(prefers-color-scheme: dark)').matches;if(d)document.documentElement.classList.add('dark');}catch(e){}})();`;
-const devErrorHook =
-  process.env.NODE_ENV === "development"
-    ? `window.__errs=[];addEventListener('error',function(e){window.__errs.push(String(e.error&&e.error.stack||e.message).slice(0,2000))});addEventListener('unhandledrejection',function(e){window.__errs.push('REJ '+String(e.reason&&e.reason.stack||e.reason).slice(0,2000))});`
-    : "";
+// The pre-paint theme script lives in lib/security so the strict sign-in CSP can allow it by hash
+// (reading a per-request nonce here would make every page dynamic). See src/lib/security/csp.ts.
+const headScript = headInlineScript(process.env.NODE_ENV === "development");
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeScript + devErrorHook }} />
+        <script dangerouslySetInnerHTML={{ __html: headScript }} />
       </head>
       <body className="min-h-dvh antialiased">
         <SerwistProvider swUrl="/sw.js">

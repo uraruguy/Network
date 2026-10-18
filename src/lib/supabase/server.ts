@@ -1,7 +1,9 @@
+import "server-only";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { clientEnv } from "@/lib/env";
 
+/** Supabase client bound to the request cookies (server components, route handlers, actions). */
 export async function supabaseServer() {
   const cookieStore = await cookies();
   return createServerClient(clientEnv.NEXT_PUBLIC_SUPABASE_URL, clientEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
@@ -16,11 +18,4 @@ export async function supabaseServer() {
       },
     },
   });
-}
-
-/** Returns the signed-in user or null. Use in server components / route handlers. */
-export async function currentUser() {
-  const supabase = await supabaseServer();
-  const { data } = await supabase.auth.getUser();
-  return data.user ?? null;
 }

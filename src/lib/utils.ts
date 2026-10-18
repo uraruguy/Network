@@ -1,5 +1,19 @@
 import { clsx, type ClassValue } from "clsx";
-import { twMerge } from "tailwind-merge";
+import { extendTailwindMerge } from "tailwind-merge";
+
+/**
+ * tailwind-merge taught about the design-system scales — otherwise it reads `text-footnote`
+ * as a text *colour* and drops it next to `text-fg-2`.
+ */
+const twMerge = extendTailwindMerge({
+  extend: {
+    theme: {
+      text: ["large-title", "title1", "title2", "title3", "headline", "body", "callout", "subhead", "footnote", "caption", "caption2"],
+      shadow: ["e1", "e2", "e3", "e4"],
+      ease: ["ios", "spring"],
+    },
+  },
+});
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -14,52 +28,27 @@ export function initials(name: string) {
     .join("");
 }
 
-/** Deterministic pastel hue from a string — used for avatar fallbacks. */
+/** Deterministic hue (0–359) from a string — used for avatar fallbacks. */
 export function hueFromString(s: string) {
   let h = 0;
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
   return h % 360;
 }
 
-export function formatRelative(date: Date | string | null | undefined, now = new Date()) {
-  if (!date) return "";
-  const d = typeof date === "string" ? new Date(date) : date;
-  const diff = (now.getTime() - d.getTime()) / 1000;
-  const abs = Math.abs(diff);
-  const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
-  if (abs < 60) return rtf.format(-Math.round(diff), "second");
-  if (abs < 3600) return rtf.format(-Math.round(diff / 60), "minute");
-  if (abs < 86400) return rtf.format(-Math.round(diff / 3600), "hour");
-  if (abs < 86400 * 30) return rtf.format(-Math.round(diff / 86400), "day");
-  if (abs < 86400 * 365) return rtf.format(-Math.round(diff / (86400 * 30)), "month");
-  return rtf.format(-Math.round(diff / (86400 * 365)), "year");
-}
-
-export function formatDate(date: Date | string | null | undefined, opts?: Intl.DateTimeFormatOptions) {
-  if (!date) return "";
-  const d = typeof date === "string" ? new Date(date) : date;
-  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", ...opts }).format(d);
-}
-
-export function localTimeIn(timeZone: string | null | undefined, now = new Date()) {
-  if (!timeZone) return null;
-  try {
-    return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", timeZone }).format(now);
-  } catch {
-    return null;
-  }
-}
+// Formatters live in ./format (cached Intl instances); re-exported here for existing imports.
+export { formatDate, formatRelative, formatShortDate, formatTime, localTimeIn, toDate } from "./format";
 
 export function flag(countryCode?: string | null) {
   if (!countryCode || countryCode.length !== 2) return "";
   return String.fromCodePoint(...[...countryCode.toUpperCase()].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65));
 }
 
+/** `color` is a CSS value for DOM styles; `token` is the custom property name for canvas/WebGL (see useResolvedTokens). */
 export const WARMTH_META = {
-  inner: { label: "Inner circle", color: "var(--warm-inner)", hint: "People closest to you" },
-  active: { label: "Active", color: "var(--warm-active)", hint: "In regular contact" },
-  dormant: { label: "Dormant", color: "var(--warm-dormant)", hint: "Worth reviving" },
-  archive: { label: "Archive", color: "var(--warm-archive)", hint: "Keeping the record" },
+  inner: { label: "Inner circle", color: "var(--warm-inner)", token: "--warm-inner", hint: "People closest to you" },
+  active: { label: "Active", color: "var(--warm-active)", token: "--warm-active", hint: "In regular contact" },
+  dormant: { label: "Dormant", color: "var(--warm-dormant)", token: "--warm-dormant", hint: "Worth reviving" },
+  archive: { label: "Archive", color: "var(--warm-archive)", token: "--warm-archive", hint: "Keeping the record" },
 } as const;
 
 export function locationLabel(l?: { name: string; country: string; countryCode?: string | null } | null) {
@@ -68,9 +57,9 @@ export function locationLabel(l?: { name: string; country: string; countryCode?:
 }
 
 export const CIRCLE_META = {
-  nice_to_know: { label: "Nice to know", short: "Nice to know", color: "#9aa9ab", hint: "Good to have in the network" },
-  hang_out_more: { label: "Want to hang out more", short: "Hang out more", color: "#f4b942", hint: "I'd like to see them more often" },
-  potential_close: { label: "Potential to be very close", short: "Very close", color: "#ff6b6b", hint: "Could become one of my closest people" },
+  nice_to_know: { label: "Nice to know", short: "Nice to know", color: "var(--circle-nice)", token: "--circle-nice", hint: "Good to have in the network" },
+  hang_out_more: { label: "Want to hang out more", short: "Hang out more", color: "var(--circle-more)", token: "--circle-more", hint: "I'd like to see them more often" },
+  potential_close: { label: "Potential to be very close", short: "Very close", color: "var(--circle-close)", token: "--circle-close", hint: "Could become one of my closest people" },
 } as const;
 
 export const HOBBY_META: Record<string, { label: string; emoji: string }> = {

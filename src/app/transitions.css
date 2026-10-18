@@ -1,0 +1,198 @@
+/* ==================================================================== */
+/*  Page transitions (React <ViewTransition> + View Transitions API)      */
+/*                                                                       */
+/*  Classes come from <PageTransition> (components/shell/transitions):   */
+/*    tab-in / tab-out     tab switches            crossfade             */
+/*    push-in / push-out   nav-forward             phone: iOS push       */
+/*    pop-in / pop-out     nav-back                desktop: slide + fade */
+/*    morph                shared elements (AvatarTransition)            */
+/*  Imported by AppShell (not the root layout).                          */
+/* ==================================================================== */
+
+:root {
+  --vt-push-dur: 480ms;
+  --vt-dim: brightness(0.9);
+  --vt-edge-shadow: -1px 0 0 var(--hairline), -18px 0 40px -14px oklch(0.25 0.03 220 / 0.24);
+}
+.dark {
+  --vt-dim: brightness(0.62);
+  --vt-edge-shadow: -1px 0 0 var(--hairline), -18px 0 44px -12px oklch(0 0 0 / 0.6);
+}
+
+/* Clicks during an animation go to the live page underneath. */
+::view-transition {
+  pointer-events: none;
+}
+
+/* ---- Anchored chrome: sidebar + tab bar never move -------------------- */
+::view-transition-group(sidebar),
+::view-transition-group(tab-bar) {
+  animation: none;
+  z-index: 100;
+}
+::view-transition-old(sidebar),
+::view-transition-old(tab-bar) {
+  display: none;
+}
+::view-transition-new(sidebar),
+::view-transition-new(tab-bar) {
+  animation: none;
+}
+
+/* Stacking: the page on top is the one moving across the screen. */
+::view-transition-group(.push-in),
+::view-transition-group(.pop-out) {
+  z-index: 2;
+}
+::view-transition-group(.push-out),
+::view-transition-group(.pop-in) {
+  z-index: 1;
+}
+
+/* ---- Tabs: crossfade (old leaves quickly, new arrives a beat later) --- */
+::view-transition-old(.tab-out) {
+  animation: 120ms var(--ease-out) both vt-fade-out;
+}
+::view-transition-new(.tab-in) {
+  animation: 210ms var(--ease-out) 40ms both vt-fade-in;
+}
+
+/* ---- Phones / tablets: iOS navigation push ------------------------------
+   New page slides in from the right edge over the old one, which drifts 25% left and dims.
+   Pages are transparent over the ambient canvas, so snapshots get an opaque canvas fill. */
+@media (max-width: 1023.98px) {
+  ::view-transition-new(.push-in) {
+    background-color: var(--bg);
+    box-shadow: var(--vt-edge-shadow);
+    animation: var(--vt-push-dur) var(--ease-ios) both vt-from-right;
+  }
+  ::view-transition-old(.push-out) {
+    background-color: var(--bg);
+    animation: var(--vt-push-dur) var(--ease-ios) both vt-to-left-dim;
+  }
+  ::view-transition-old(.pop-out) {
+    background-color: var(--bg);
+    box-shadow: var(--vt-edge-shadow);
+    animation: var(--vt-push-dur) var(--ease-ios) both vt-to-right;
+  }
+  ::view-transition-new(.pop-in) {
+    background-color: var(--bg);
+    animation: var(--vt-push-dur) var(--ease-ios) both vt-from-left-dim;
+  }
+}
+
+/* ---- Desktop: subtle 24px slide + fade ---------------------------------- */
+@media (min-width: 1024px) {
+  ::view-transition-old(.push-out) {
+    animation:
+      140ms var(--ease-in) both vt-fade-out,
+      320ms var(--ease-ios) both vt-nudge-left;
+  }
+  ::view-transition-new(.push-in) {
+    animation:
+      220ms var(--ease-out) 90ms both vt-fade-in,
+      400ms var(--ease-ios) both vt-nudge-from-right;
+  }
+  ::view-transition-old(.pop-out) {
+    animation:
+      140ms var(--ease-in) both vt-fade-out,
+      320ms var(--ease-ios) both vt-nudge-right;
+  }
+  ::view-transition-new(.pop-in) {
+    animation:
+      220ms var(--ease-out) 90ms both vt-fade-in,
+      400ms var(--ease-ios) both vt-nudge-from-left;
+  }
+}
+
+/* ---- Shared element morph (avatars) ------------------------------------ */
+::view-transition-group(.morph) {
+  z-index: 50;
+  animation-duration: 440ms;
+  animation-timing-function: var(--ease-ios);
+}
+::view-transition-image-pair(.morph) {
+  animation: 440ms var(--ease-ios) both vt-soften;
+}
+
+/* ---- Reduced motion: no movement, a short crossfade only ---------------- */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*) {
+    animation-duration: 0s !important;
+  }
+  ::view-transition-old(.tab-out),
+  ::view-transition-old(.push-out),
+  ::view-transition-old(.pop-out) {
+    background: none !important;
+    box-shadow: none !important;
+    animation: 120ms var(--ease-out) both vt-fade-out !important;
+  }
+  ::view-transition-new(.tab-in),
+  ::view-transition-new(.push-in),
+  ::view-transition-new(.pop-in) {
+    background: none !important;
+    box-shadow: none !important;
+    animation: 160ms var(--ease-out) both vt-fade-in !important;
+  }
+  ::view-transition-image-pair(.morph) {
+    animation: none !important;
+  }
+}
+
+@keyframes vt-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes vt-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes vt-from-right {
+  from {
+    transform: translateX(100%);
+  }
+}
+@keyframes vt-to-right {
+  to {
+    transform: translateX(100%);
+  }
+}
+@keyframes vt-to-left-dim {
+  to {
+    transform: translateX(-25%);
+    filter: var(--vt-dim);
+  }
+}
+@keyframes vt-from-left-dim {
+  from {
+    transform: translateX(-25%);
+    filter: var(--vt-dim);
+  }
+}
+@keyframes vt-nudge-left {
+  to {
+    transform: translateX(-24px);
+  }
+}
+@keyframes vt-nudge-right {
+  to {
+    transform: translateX(24px);
+  }
+}
+@keyframes vt-nudge-from-right {
+  from {
+    transform: translateX(24px);
+  }
+}
+@keyframes vt-nudge-from-left {
+  from {
+    transform: translateX(-24px);
+  }
+}
+@keyframes vt-soften {
+  30% {
+    filter: blur(2px);
+  }
+}

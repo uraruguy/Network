@@ -1,25 +1,29 @@
-import { Suspense } from "react";
+import type { Metadata } from "next";
+import { connection } from "next/server";
+import { AuthScreen } from "@/components/auth/AuthScreen";
 import { LoginForm } from "./LoginForm";
-import { Logo } from "@/components/shell/Logo";
 
-export const metadata = { title: "Sign in" };
+export const metadata: Metadata = { title: "Sign in" };
 
-export default function LoginPage() {
+type Props = { searchParams: Promise<Record<string, string | string[] | undefined>> };
+
+const NOTICES: Record<string, string> = {
+  auth: "That sign-in link was invalid or has expired.",
+  reset: "That reset link has expired or was opened in a different browser. Request a new one below.",
+};
+
+/**
+ * Password step. Rendered per request (`connection()`) so the proxy's nonce CSP applies.
+ * There is deliberately no sign-up: the single owner account is created in Supabase.
+ */
+export default async function LoginPage({ searchParams }: Props) {
+  await connection();
+  const sp = await searchParams;
+  const next = typeof sp.next === "string" ? sp.next : null;
+  const error = typeof sp.error === "string" ? sp.error : null;
   return (
-    <main className="grid min-h-dvh place-items-center p-5">
-      <div className="app-bg" aria-hidden />
-      <div className="w-full max-w-[400px]">
-        <div className="mb-8 flex flex-col items-center gap-3 text-center">
-          <Logo size={56} />
-          <div>
-            <h1 className="text-[26px] font-semibold tracking-tight">The Network</h1>
-            <p className="mt-1 text-[15px] text-fg-2">Your people, on a globe.</p>
-          </div>
-        </div>
-        <Suspense>
-          <LoginForm />
-        </Suspense>
-      </div>
-    </main>
+    <AuthScreen title="The Network" subtitle="Sign in to your people.">
+      <LoginForm next={next} notice={error ? (NOTICES[error] ?? NOTICES.auth!) : null} startInReset={error === "reset"} />
+    </AuthScreen>
   );
 }

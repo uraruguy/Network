@@ -5,6 +5,7 @@ import { db, schema } from "@/lib/db";
 import { classifyBatch, extractNote } from "@/lib/ai/import";
 import type { Candidate, Extraction } from "@/lib/ai/import-schemas";
 import { htmlToMarkdown } from "@/lib/html-to-md";
+import { isoDate, mergePatch } from "@/lib/import/legacy-merge";
 import { createPerson, updatePerson } from "./people";
 import { createNote } from "./notes";
 import { createReminder } from "./reminders";
@@ -87,7 +88,8 @@ export async function listJobs(ownerId: string) {
 export async function getJob(ownerId: string, jobId: string) {
   const job = await db.query.importJobs.findFirst({ where: and(eq(importJobs.ownerId, ownerId), eq(importJobs.id, jobId)) });
   if (!job) return null;
-  const items = await db.query.importItems.findMany({ where: eq(importItems.jobId, jobId), orderBy: [desc(importItems.externalModifiedAt)] });
+  // Note bodies are fetched lazily per item (GET /api/import/items/[id]); the job poll stays small.
+  const items = await db.query.importItems.findMany({ where: eq(importItems.jobId, jobId), orderBy: [desc(importItems.externalModifiedAt)], columns: { html: false, text: false } });
   return { ...job, items };
 }
 
@@ -264,21 +266,10 @@ export async function commitItem(ownerId: string, itemId: string, decision: Deci
       if (dup) { d.action = "merge"; d.personId = dup.id; }
     }
     if (d.action === "merge" && d.personId) {
-      const existing = await db.query.people.findFirst({ where: and(eq(people.ownerId, ownerId), eq(people.id, d.personId)), with: { categories: true } });
+      const existing = await db.query.people.findFirst({ where: and(eq(people.ownerId, ownerId), eq(people.id, d.personId), isNull(people.deletedAt)), with: { categories: true } });
       if (!existing) continue;
-      const mergedCats = Array.from(new Set([...existing.categories.map((pc) => pc.categoryId), ...categoryIds]));
-      await updatePerson(ownerId, d.personId, {
-        headline: existing.headline ?? c.role ?? undefined,
-        company: existing.company ?? c.company ?? undefined,
-        homeLocation: existing.homeLocationId ? undefined : home,
-        metContext: existing.metContext ?? c.metContext ?? undefined,
-        metAt: existing.metAt ?? c.metDate ?? undefined,
-        circle: existing.circle ?? c.circle ?? undefined,
-        hobbies: Array.from(new Set([...existing.hobbies, ...c.hobbies])) as never,
-        howICanHelp: existing.howICanHelp ?? c.howICanHelp ?? undefined,
-        whatICanAsk: existing.whatICanAsk ?? c.whatICanAsk ?? undefined,
-        categoryIds: mergedCats,
-      });
+      const patch = mergePatch(existing, c, home, categoryIds);
+      if (Object.keys(patch).length) await updatePerson(ownerId, d.personId, patch);
       resolved.set(d.index, d.personId);
     } else {
       const met = await geocode(c.metCity, null);
@@ -290,7 +281,7 @@ export async function commitItem(ownerId: string, itemId: string, decision: Deci
           company: c.company,
           homeLocation: home,
           metContext: c.metContext,
-          metAt: c.metDate && /^\d{4}-\d{2}-\d{2}$/.test(c.metDate) ? c.metDate : null,
+          metAt: isoDate(c.metDate),
           metLocation: met,
           warmth: c.warmth ?? "active",
           circle: c.circle,

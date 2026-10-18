@@ -1,37 +1,176 @@
 "use client";
-import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { useInfiniteQuery, useIsMutating, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
+import { toast } from "@/components/ui/Toast";
+import { api, ApiError } from "@/lib/api";
 import type { PersonInput, PersonPatch } from "@/lib/schemas";
+import { fold } from "@/lib/text";
+import { matchesText, toLegacyDetail, toPersonListItem } from "./compat";
 import { keys } from "./keys";
-import type { Category, PersonDetail, PersonListItem } from "./types";
+import { applyPersonPatch, indexRowFromDetail, seedPersonDetail, upsertIndexRow, type Lookups } from "./people-cache";
+import { registerReminderMutations } from "./reminders";
+import { registerTaxonomyMutations, useActivities } from "./taxonomy";
+import type { ActivityRow, Category, NotesPage, PeopleSearchPage, PersonDetailApi, PersonIndexRow, RecentNoteApi, TagRow } from "./types";
+import { activityEntity, personEntity, scopeFor } from "./write-order";
 
 export type PeopleFilters = { q?: string; category?: string; warmth?: string; country?: string };
 
-function qs(filters: PeopleFilters) {
-  const p = new URLSearchParams();
-  for (const [k, v] of Object.entries(filters)) if (v) p.set(k, v);
-  const s = p.toString();
-  return s ? `?${s}` : "";
-}
+/* ---------- reads ---------- */
 
-export function usePeople(filters: PeopleFilters = {}) {
-  return useQuery({
-    queryKey: keys.people(filters),
-    queryFn: () => api.get<PersonListItem[]>(`/api/people${qs(filters)}`),
-  });
-}
-
-export function usePerson(id: string | null) {
-  return useQuery({
-    queryKey: keys.person(id ?? ""),
-    queryFn: () => api.get<PersonDetail>(`/api/people/${id}`),
-    enabled: !!id,
-  });
+/** Every person as a compact row (cached whole, persisted offline). */
+export function usePeopleIndex() {
+  return useQuery({ queryKey: keys.peopleIndex(), queryFn: () => api.get<PersonIndexRow[]>("/api/people") });
 }
 
 export function useCategories() {
   return useQuery({ queryKey: keys.categories(), queryFn: () => api.get<Category[]>("/api/categories"), staleTime: 5 * 60_000 });
 }
+
+/**
+ * v1-compatible people list, filtered locally from the cached index (instant, works offline).
+ * Rows carry `categories` objects and legacy `hobbies` for the current screens.
+ */
+export function usePeople(filters: PeopleFilters = {}) {
+  const index = usePeopleIndex();
+  const { data: cats } = useCategories();
+  const { data: acts } = useActivities();
+  const { q, category, warmth, country } = filters;
+  const data = useMemo(() => {
+    if (!index.data) return undefined;
+    const needle = q ? fold(q.trim()) : "";
+    return index.data
+      .filter(
+        (p) =>
+          matchesText(p, needle, fold) &&
+          (!category || p.categoryIds.includes(category)) &&
+          (!warmth || p.warmth === warmth) &&
+          (!country || p.homeLocation?.countryCode?.toUpperCase() === country.toUpperCase()),
+      )
+      .map((p) => toPersonListItem(p, cats ?? [], acts ?? []));
+  }, [index.data, cats, acts, q, category, warmth, country]);
+  return { ...index, data };
+}
+
+/** Server-side people search (ranked full-text + filters), paginated. For AI-ish / large queries. */
+export function usePeopleSearch(params: Record<string, string | string[] | undefined>, opts: { enabled?: boolean } = {}) {
+  return useInfiniteQuery({
+    queryKey: keys.peopleSearch(params),
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) => {
+      const qs = new URLSearchParams();
+      for (const [k, v] of Object.entries(params)) {
+        if (Array.isArray(v)) v.forEach((x) => qs.append(k, x));
+        else if (v) qs.set(k, v);
+      }
+      if (pageParam) qs.set("cursor", pageParam);
+      return api.get<PeopleSearchPage>(`/api/people/search?${qs}`);
+    },
+    getNextPageParam: (last) => last.nextCursor,
+    enabled: opts.enabled ?? true,
+    gcTime: 60_000,
+    meta: { persist: false },
+  });
+}
+
+/** Raw v2 person detail. */
+export function usePersonDetail(id: string | null) {
+  return useQuery({ queryKey: keys.person(id ?? ""), queryFn: () => api.get<PersonDetailApi>(`/api/people/${id}`), enabled: !!id });
+}
+
+/**
+ * The profile screen's read: the full detail, plus the cached index row as an instant preview
+ * (name, role, city, avatar) while the detail loads. A person created on this device whose create
+ * is still queued (offline) isn't fetched — the seeded detail is the truth until it syncs.
+ */
+export function usePersonProfile(id: string) {
+  const creating = useIsMutating({ mutationKey: MUT.createPerson, predicate: (m) => (m.state.variables as { id?: string } | undefined)?.id === id });
+  const detail = useQuery({
+    queryKey: keys.person(id),
+    queryFn: () => api.get<PersonDetailApi>(`/api/people/${id}`),
+    enabled: !!id && creating === 0,
+    retry: (count, e) => !(e instanceof ApiError && e.status === 404) && count < 1,
+  });
+  const { data: index } = usePeopleIndex();
+  const preview = useMemo(() => index?.find((p) => p.id === id), [index, id]);
+  const notFound = !detail.data && detail.error instanceof ApiError && detail.error.status === 404;
+  return { ...detail, person: detail.data, preview, notFound, creating: creating > 0 };
+}
+
+/** v1-compatible person detail (adds `hobbies`, note `contentText`). */
+export function usePerson(id: string | null) {
+  const q = usePersonDetail(id);
+  const { data: acts } = useActivities();
+  const data = useMemo(() => (q.data ? toLegacyDetail(q.data, acts ?? []) : undefined), [q.data, acts]);
+  return { ...q, data };
+}
+
+/** A person's notes, newest first, page by page (excerpts unless `full`). */
+export function usePersonNotes(personId: string | null, opts: { full?: boolean; pageSize?: number } = {}) {
+  return useInfiniteQuery({
+    queryKey: [...keys.personNotes(personId ?? ""), opts.full ? "full" : "summary"],
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) => {
+      const qs = new URLSearchParams({ limit: String(opts.pageSize ?? 30) });
+      if (opts.full) qs.set("full", "1");
+      if (pageParam) qs.set("before", pageParam);
+      return api.get<NotesPage>(`/api/people/${personId}/notes?${qs}`);
+    },
+    getNextPageParam: (last) => last.nextCursor,
+    enabled: !!personId,
+  });
+}
+
+/* ---------- optimistic cache plumbing ---------- */
+
+/** Everything cached that optimistic person writes resolve relations from. */
+export function cachedLookups(qc: QueryClient): Lookups {
+  return {
+    categories: qc.getQueryData<Category[]>(keys.categories()),
+    activities: qc.getQueryData<ActivityRow[]>(keys.activities()),
+    tags: qc.getQueryData<TagRow[]>(keys.tags()),
+    people: qc.getQueryData<PersonIndexRow[]>(keys.peopleIndex()),
+  };
+}
+
+/** Writes a detail into the cache and mirrors it into the people index. */
+function putPerson(qc: QueryClient, detail: PersonDetailApi) {
+  qc.setQueryData(keys.person(detail.id), detail);
+  qc.setQueryData<PersonIndexRow[]>(keys.peopleIndex(), (rows) => (rows ? upsertIndexRow(rows, indexRowFromDetail(detail)) : rows));
+}
+
+function removeFromIndex(qc: QueryClient, id: string) {
+  qc.setQueryData<PersonIndexRow[]>(keys.peopleIndex(), (rows) => rows?.filter((r) => r.id !== id));
+}
+
+/** A removed person's follow-ups and notes leave Today (and every other list) at once. */
+function removePersonRows(qc: QueryClient, id: string) {
+  for (const [key, list] of qc.getQueriesData<{ personId: string }[]>({ queryKey: ["reminders"] })) {
+    if (list?.some((r) => r.personId === id)) qc.setQueryData(key, list.filter((r) => r.personId !== id));
+  }
+  qc.setQueryData<RecentNoteApi[]>(keys.recentNotes(), (list) => list?.filter((n) => n.personId !== id));
+}
+
+/** Lists that hold a person's follow-ups and notes (Today): refreshed after a removal or restore. */
+function invalidatePersonRows(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: ["reminders"] });
+  qc.invalidateQueries({ queryKey: ["notes"] });
+  qc.invalidateQueries({ queryKey: keys.stats() });
+}
+
+/** Server truth for everything a person write touches — skipped while other person writes are in flight. */
+function invalidatePeople(qc: QueryClient, id?: string) {
+  if (qc.isMutating({ mutationKey: ["people"] }) > 1) return;
+  qc.invalidateQueries({ queryKey: ["people"] });
+  if (id) qc.invalidateQueries({ queryKey: keys.person(id) });
+  qc.invalidateQueries({ queryKey: keys.globe() });
+  qc.invalidateQueries({ queryKey: keys.graph() });
+  qc.invalidateQueries({ queryKey: keys.stats() });
+  qc.invalidateQueries({ queryKey: keys.taxonomy() });
+  qc.invalidateQueries({ queryKey: keys.tags() });
+  qc.invalidateQueries({ queryKey: keys.activities() });
+}
+
+const errorText = (e: unknown) => (e instanceof Error ? e.message : undefined);
 
 /* ---------- mutations (defaults registered once so paused/offline mutations can resume after reload) ---------- */
 
@@ -39,63 +178,152 @@ export const MUT = {
   createPerson: ["people", "create"] as const,
   updatePerson: ["people", "update"] as const,
   deletePerson: ["people", "delete"] as const,
+  restorePerson: ["people", "restore"] as const,
 };
 
+export type CreatePersonVars = PersonInput & { id: string };
+export type UpdatePersonVars = { id: string; patch: PersonPatch };
+
+/**
+ * Registers mutation defaults for people — and, until the providers call each registrar, also
+ * for activities/tags and reminders (safe to call more than once). Optimistic cache changes run in
+ * `onMutate`, so they happen once (a persisted mutation resuming after a reload skips it).
+ */
 export function registerPeopleMutations(qc: QueryClient) {
-  qc.setMutationDefaults(MUT.createPerson, {
-    mutationFn: (input: PersonInput) => api.post<PersonDetail>("/api/people", input),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["people"] }).then(() => qc.invalidateQueries({ queryKey: keys.globe() })),
-  });
-  qc.setMutationDefaults(MUT.updatePerson, {
-    mutationFn: ({ id, patch }: { id: string; patch: PersonPatch }) => api.patch<PersonDetail>(`/api/people/${id}`, patch),
-    onSuccess: (data: PersonDetail) => {
-      qc.setQueryData(keys.person(data.id), data);
-      qc.invalidateQueries({ queryKey: ["people"] });
-      qc.invalidateQueries({ queryKey: keys.globe() });
+  qc.setMutationDefaults<PersonDetailApi, Error, CreatePersonVars>(MUT.createPerson, {
+    mutationFn: (input: CreatePersonVars) => api.post<PersonDetailApi>("/api/people", input),
+    onMutate: async (input: CreatePersonVars) => {
+      if (!qc.getQueryData(keys.person(input.id))) putPerson(qc, seedPersonDetail(input, cachedLookups(qc)));
     },
+    onSuccess: (data: PersonDetailApi) => putPerson(qc, data),
+    onError: (e: unknown, input: CreatePersonVars) => {
+      removeFromIndex(qc, input.id);
+      qc.removeQueries({ queryKey: keys.person(input.id), exact: true });
+      toast.error(`Couldn’t add ${input.displayName}`, {
+        description: errorText(e),
+        duration: 10_000,
+        action: { label: "Retry", onClick: () => void runPerson(qc, MUT.createPerson, input, input.id).catch(() => {}) },
+      });
+    },
+    onSettled: (_d: unknown, _e: unknown, input: CreatePersonVars) => invalidatePeople(qc, input.id),
   });
-  qc.setMutationDefaults(MUT.deletePerson, {
+  qc.setMutationDefaults<PersonDetailApi, Error, UpdatePersonVars>(MUT.updatePerson, {
+    mutationFn: ({ id, patch }: UpdatePersonVars) => api.patch<PersonDetailApi>(`/api/people/${id}`, patch),
+    onMutate: async ({ id, patch }: UpdatePersonVars) => {
+      await qc.cancelQueries({ queryKey: keys.person(id) });
+      const current = qc.getQueryData<PersonDetailApi>(keys.person(id));
+      if (current) putPerson(qc, applyPersonPatch(current, patch, cachedLookups(qc)));
+    },
+    onSuccess: (data: PersonDetailApi) => putPerson(qc, data),
+    onError: (e: unknown, { id }: UpdatePersonVars) => {
+      toast.error("Couldn’t save changes", { description: errorText(e) });
+      qc.invalidateQueries({ queryKey: keys.person(id) });
+      qc.invalidateQueries({ queryKey: keys.peopleIndex() });
+    },
+    onSettled: (_d: unknown, _e: unknown, { id }: UpdatePersonVars) => invalidatePeople(qc, id),
+  });
+  qc.setMutationDefaults<unknown, Error, string>(MUT.deletePerson, {
     mutationFn: (id: string) => api.delete(`/api/people/${id}`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["people"] });
-      qc.invalidateQueries({ queryKey: keys.globe() });
+    onMutate: async (id: string) => {
+      removeFromIndex(qc, id);
+      removePersonRows(qc, id);
+    },
+    onError: (e: unknown) => {
+      toast.error("Couldn’t remove this person", { description: errorText(e) });
+      qc.invalidateQueries({ queryKey: keys.peopleIndex() });
+    },
+    onSettled: (_d: unknown, _e: unknown, id: string) => {
+      invalidatePersonRows(qc);
+      invalidatePeople(qc, id);
     },
   });
+  qc.setMutationDefaults<PersonDetailApi, Error, string>(MUT.restorePerson, {
+    mutationFn: (id: string) => api.post<PersonDetailApi>(`/api/people/${id}/restore`),
+    onMutate: async (id: string) => {
+      const cached = qc.getQueryData<PersonDetailApi>(keys.person(id));
+      if (cached) putPerson(qc, cached);
+    },
+    onSuccess: (data: PersonDetailApi) => putPerson(qc, data),
+    onError: (e: unknown) => toast.error("Couldn’t restore", { description: errorText(e) }),
+    onSettled: (_d: unknown, _e: unknown, id: string) => {
+      invalidatePersonRows(qc);
+      invalidatePeople(qc, id);
+    },
+  });
+  registerTaxonomyMutations(qc);
+  registerReminderMutations(qc);
 }
 
+/** Entities a person write references that may still be queued: new activities, the introducer. */
+function personDeps(variables: unknown): string[] {
+  const v = variables as (Partial<PersonInput> & { patch?: PersonPatch }) | string | undefined;
+  if (!v || typeof v === "string") return [];
+  const fields = v.patch ?? v;
+  return [...(fields.activityIds ?? []).map(activityEntity), personEntity(fields.introducedById)].filter((e): e is string => !!e);
+}
+
+/**
+ * Runs a person mutation through its defaults, serialized with other writes to the same person —
+ * and behind a new activity or introducer it references whose create is still queued.
+ */
+function runPerson<TData, TVars>(qc: QueryClient, mutationKey: readonly unknown[], variables: TVars, personId: string): Promise<TData> {
+  const scope = scopeFor(qc, `person:${personId}`, personDeps(variables));
+  const mutation = qc.getMutationCache().build<TData, Error, TVars, unknown>(qc, { mutationKey, scope: { id: scope } });
+  return mutation.execute(variables);
+}
+
+const ignore = () => {};
+
+/**
+ * Fire-and-forget person writes: the cache (detail + index) updates instantly, requests run in
+ * the background in per-person order (create → edits → delete), offline writes replay on reconnect.
+ */
+export function personWrites(qc: QueryClient) {
+  return {
+    /** Creates a person and returns their (client-generated) id — navigate to it right away. */
+    create(input: PersonInput): string {
+      const id = input.id ?? crypto.randomUUID();
+      runPerson(qc, MUT.createPerson, { ...input, id }, id).catch(ignore);
+      return id;
+    },
+    update(id: string, patch: PersonPatch) {
+      runPerson(qc, MUT.updatePerson, { id, patch }, id).catch(ignore);
+    },
+    remove(id: string) {
+      runPerson(qc, MUT.deletePerson, id, id).catch(ignore);
+    },
+    restore(id: string): Promise<PersonDetailApi> {
+      return runPerson<PersonDetailApi, string>(qc, MUT.restorePerson, id, id);
+    },
+  };
+}
+
+/** `personWrites` for components. */
+export function usePersonWrites() {
+  const qc = useQueryClient();
+  return useMemo(() => personWrites(qc), [qc]);
+}
+
+/* ---------- v1-compatible hooks ---------- */
+
+/**
+ * Creates a person. A client-generated id is attached at call time, so retries and offline replays
+ * after a reload hit the same id (the server treats repeats as idempotent).
+ */
 export function useCreatePerson() {
-  return useMutation<PersonDetail, Error, PersonInput>({ mutationKey: MUT.createPerson });
+  const m = useMutation<PersonDetailApi, Error, CreatePersonVars>({ mutationKey: MUT.createPerson });
+  return { ...m, mutate: (input: PersonInput, opts?: Parameters<typeof m.mutate>[1]) => m.mutate({ ...input, id: input.id ?? crypto.randomUUID() }, opts) };
 }
 
 export function useUpdatePerson(id: string) {
-  const qc = useQueryClient();
-  return useMutation<PersonDetail, Error, PersonPatch, { previous?: PersonDetail }>({
-    mutationKey: MUT.updatePerson,
-    mutationFn: (patch) => api.patch<PersonDetail>(`/api/people/${id}`, patch),
-    onMutate: async (patch) => {
-      await qc.cancelQueries({ queryKey: keys.person(id) });
-      const previous = qc.getQueryData<PersonDetail>(keys.person(id));
-      if (previous) {
-        const { homeLocation: _h, metLocation: _m, categoryIds: _c, nextFollowupAt, ...cols } = patch;
-        qc.setQueryData<PersonDetail>(keys.person(id), {
-          ...previous,
-          ...cols,
-          ...(nextFollowupAt !== undefined ? { nextFollowupAt: nextFollowupAt ? new Date(nextFollowupAt) : null } : {}),
-        } as PersonDetail);
-      }
-      return { previous };
-    },
-    onError: (_e, _v, ctx) => {
-      if (ctx?.previous) qc.setQueryData(keys.person(id), ctx.previous);
-    },
-    onSuccess: (data) => {
-      qc.setQueryData(keys.person(id), data);
-      qc.invalidateQueries({ queryKey: ["people"] });
-      qc.invalidateQueries({ queryKey: keys.globe() });
-    },
-  });
+  const m = useMutation<PersonDetailApi, Error, UpdatePersonVars>({ mutationKey: MUT.updatePerson, scope: { id: `person:${id}` } });
+  return { ...m, mutate: (patch: PersonPatch, opts?: Parameters<typeof m.mutate>[1]) => m.mutate({ id, patch }, opts) };
 }
 
 export function useDeletePerson() {
   return useMutation<unknown, Error, string>({ mutationKey: MUT.deletePerson });
+}
+
+export function useRestorePerson() {
+  return useMutation<PersonDetailApi, Error, string>({ mutationKey: MUT.restorePerson });
 }

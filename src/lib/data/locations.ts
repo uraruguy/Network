@@ -1,16 +1,14 @@
-import { and, eq, sql } from "drizzle-orm";
-import { db, schema } from "@/lib/db";
+import "server-only";
+import { sql } from "drizzle-orm";
+import { db, schema, type Tx } from "@/lib/db";
 import type { LocationData } from "@/lib/schemas";
 
-/** Find-or-create an owner-scoped location. Cities from the dataset dedupe on cityId. */
-export async function upsertLocation(ownerId: string, input: LocationData) {
-  if (input.cityId) {
-    const existing = await db.query.locations.findFirst({
-      where: and(eq(schema.locations.ownerId, ownerId), eq(schema.locations.cityId, input.cityId)),
-    });
-    if (existing) return existing;
-  }
-  const [row] = await db
+/**
+ * Find-or-create an owner-scoped location in one statement. Places from the cities dataset dedupe
+ * on (owner, cityId); manual places (no cityId) are always inserted.
+ */
+export async function upsertLocation(ownerId: string, input: LocationData, tx: Tx | typeof db = db) {
+  const [row] = await tx
     .insert(schema.locations)
     .values({
       ownerId,
@@ -24,13 +22,18 @@ export async function upsertLocation(ownerId: string, input: LocationData) {
       cityId: input.cityId ?? null,
       source: input.cityId ? "cities" : "manual",
     })
+    .onConflictDoUpdate({
+      target: [schema.locations.ownerId, schema.locations.cityId],
+      // Keep the stored row; touching updated_at makes RETURNING yield the existing id.
+      set: { updatedAt: sql`now()` },
+    })
     .returning();
   return row!;
 }
 
 export async function searchCities(q: string, limit = 8) {
   if (!q.trim()) return [];
-  // search_cities() is defined in the migration (prefix match, population-ranked)
+  // search_cities() is defined in the init migration (prefix match, population-ranked)
   const rows = await db.execute(sql`select * from search_cities(${q.trim()}, ${limit})`);
   return rows.map((r) => ({
     id: Number(r.id),

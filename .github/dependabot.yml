@@ -1,0 +1,44 @@
+version: 2
+updates:
+  # pnpm uses the npm ecosystem (reads pnpm-lock.yaml). Majors outside the named groups arrive as
+  # single PRs so each breaking change can be read on its own.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: deps
+    groups:
+      next:
+        patterns: ["next", "eslint-config-next", "@next/*"]
+      react:
+        patterns: ["react", "react-dom", "@types/react", "@types/react-dom", "babel-plugin-react-compiler"]
+      ai:
+        patterns: ["ai", "@ai-sdk/*", "@openrouter/*", "ai-sdk-provider-claude-code", "@modelcontextprotocol/*", "mcp-handler"]
+      supabase:
+        patterns: ["@supabase/*"]
+      tanstack:
+        patterns: ["@tanstack/*"]
+      tiptap:
+        patterns: ["@tiptap/*"]
+      serwist:
+        patterns: ["serwist", "@serwist/*"]
+      drizzle:
+        patterns: ["drizzle-orm", "drizzle-kit", "postgres"]
+      dev-tooling:
+        dependency-type: development
+        update-types: [minor, patch]
+      minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns: ["*"]
