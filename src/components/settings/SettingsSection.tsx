@@ -1,4 +1,6 @@
 "use client";
+import { SettingsSkeleton } from "@/components/skeletons/SettingsSkeleton";
+import { useCacheReady } from "@/lib/offline/useCacheReady";
 import type { SectionId } from "./nav";
 import { ActivitiesSection } from "./sections/ActivitiesSection";
 import { AppearanceSection } from "./sections/AppearanceSection";
@@ -25,8 +27,13 @@ const PAGES: Record<SectionId, () => React.ReactNode> = {
   setup: SetupSection,
 };
 
-/** The detail page for `/settings/<id>`. */
+/**
+ * The detail page for `/settings/<id>`. Sections render from the offline cache, so they wait for
+ * it to be renderable (see useCacheReady): the statically generated HTML and the hydration render
+ * then agree on the skeleton. Client-side navigations render the section straight away.
+ */
 export function SettingsSection({ id }: { id: SectionId }) {
+  const ready = useCacheReady();
   const Page = PAGES[id];
-  return <Page />;
+  return ready ? <Page /> : <SettingsSkeleton header={false} />;
 }

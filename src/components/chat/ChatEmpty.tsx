@@ -1,7 +1,6 @@
 "use client";
-import { motion } from "motion/react";
 import { Sparkles } from "lucide-react";
-import { listItem } from "@/lib/motion";
+import type { CSSProperties } from "react";
 
 /** First screen of a conversation: what the assistant can do, plus one-tap starters. */
 export function ChatEmpty({ personName, homeCity, onPick }: { personName: string | null; homeCity: string | null; onPick: (text: string) => void }) {
@@ -35,9 +34,9 @@ export function ChatEmpty({ personName, homeCity, onPick }: { personName: string
       </div>
       <ul className="grid w-full gap-2 sm:grid-cols-2">
         {suggestions.map((s, i) => (
-          // Same initial state on server and client (no hydration mismatch); MotionConfig's
-          // reducedMotion="user" drops the movement for people who asked for less.
-          <motion.li key={s} variants={listItem} custom={i} initial="initial" animate="animate">
+          // CSS entrance (chat.css), not motion: the starters are in the server HTML and stay
+          // visible even if JS is slow or animations can't run; identical markup on both sides.
+          <li key={s} className="chat-rise" style={{ "--i": Math.min(i, 12) } as CSSProperties}>
             <button
               type="button"
               onClick={() => onPick(s)}
@@ -45,7 +44,7 @@ export function ChatEmpty({ personName, homeCity, onPick }: { personName: string
             >
               {s}
             </button>
-          </motion.li>
+          </li>
         ))}
       </ul>
     </div>

@@ -9,6 +9,7 @@ import { ListRow } from "@/components/ui/ListRow";
 import { SearchField } from "@/components/ui/SearchField";
 import { matchesQuery } from "@/components/ui/search";
 import { confirm } from "@/components/ui/confirm";
+import { useReadyData } from "@/lib/offline/useCacheReady";
 import { useProfile } from "@/lib/queries/settings";
 import { cn } from "@/lib/utils";
 import { GROUPS, SECTIONS, SECTION_IDS, sectionHref, type SectionId } from "./nav";
@@ -34,7 +35,7 @@ export function useSignOut() {
 
 /** iOS Settings index: account card, setup banner, grouped rows, sign out. */
 export function SettingsIndexList() {
-  const { data: profile } = useProfile();
+  const profile = useReadyData(useProfile());
   const values = useSectionValues();
   const { query, setQuery, matches } = useSearch();
   const onSignOut = useSignOut();
@@ -119,7 +120,7 @@ function CountBadge({ count }: { count: number }) {
 
 /** macOS System Settings sidebar: search, account, sections, sign out. */
 export function SettingsSidebar({ active }: { active: SectionId | null }) {
-  const { data: profile } = useProfile();
+  const profile = useReadyData(useProfile());
   const values = useSectionValues();
   const { query, setQuery, matches } = useSearch();
   const onSignOut = useSignOut();

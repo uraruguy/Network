@@ -1,5 +1,6 @@
 "use client";
 import type { ReactNode } from "react";
+import { useReadyData } from "@/lib/offline/useCacheReady";
 import { useAiConnection, useEmailConnection, useProfile, useSetupStatus } from "@/lib/queries/settings";
 import { useTaxonomy } from "@/lib/queries/taxonomy";
 import { useThemePreference } from "@/lib/theme";
@@ -13,11 +14,12 @@ export const formatHour = (h: number) => `${String(h).padStart(2, "0")}:00`;
 /** Trailing values for the settings list ("Auto", "07:00", "12", a status pill …). */
 export function useSectionValues(): Partial<Record<SectionId, ReactNode>> & { setupRemaining: number | null; attention: Partial<Record<SectionId, "error" | "warn">> } {
   const [theme] = useThemePreference();
-  const { data: profile } = useProfile();
-  const { data: taxonomy } = useTaxonomy();
-  const { data: ai } = useAiConnection();
-  const { data: email } = useEmailConnection();
-  const { data: setup } = useSetupStatus();
+  // Cached values only once they may render (see useCacheReady): the server has none.
+  const profile = useReadyData(useProfile());
+  const taxonomy = useReadyData(useTaxonomy());
+  const ai = useReadyData(useAiConnection());
+  const email = useReadyData(useEmailConnection());
+  const setup = useReadyData(useSetupStatus());
 
   const connections = (() => {
     if (!ai || !email) return undefined;

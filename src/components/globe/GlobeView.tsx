@@ -18,6 +18,7 @@ import { buttonVariants, GlassButton } from "@/components/glass/GlassButton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { EMPTY_FILTERS, filterPeople, filtersFromParams, filtersToParams, isEmpty, type Facet, type PeopleFilters } from "@/lib/filters/people-filters";
 import { useIsPhone } from "@/lib/media";
+import { useCacheReady } from "@/lib/offline/useCacheReady";
 import { useProfile } from "@/lib/queries/misc";
 import { usePeopleIndex } from "@/lib/queries/people";
 import { useActivities } from "@/lib/queries/taxonomy";
@@ -58,12 +59,17 @@ export function GlobeView() {
   const peopleQuery = usePeopleIndex();
   const profileQuery = useProfile();
   const { data: activityRows } = useActivities();
-  const people = useMemo(() => peopleQuery.data ?? [], [peopleQuery.data]);
+  // Cached data only once it may render (see useCacheReady), so the server HTML and the
+  // hydration render agree (skeleton, "Loading…"); client navigations get it straight away.
+  const cacheReady = useCacheReady();
+  const peopleData = cacheReady ? peopleQuery.data : undefined;
+  const peoplePending = !cacheReady || peopleQuery.isPending;
+  const people = useMemo(() => peopleData ?? [], [peopleData]);
   const filtered = useMemo(() => filterPeople(people, filters), [people, filters]);
   const { collection, groups, withoutCity } = useMemo(() => buildCityData(filtered), [filtered]);
   const activities = useMemo<ActivityLookup>(() => new Map((activityRows ?? []).map((a) => [a.id, a])), [activityRows]);
 
-  const homeLoc = profileQuery.data?.homeLocation ?? null;
+  const homeLoc = (cacheReady ? profileQuery.data?.homeLocation : null) ?? null;
   const home = useMemo(() => (homeLoc ? { lat: homeLoc.lat, lng: homeLoc.lng } : null), [homeLoc]);
   const [arcsOn, setArcsOn] = useState(false);
   const arcs = useMemo(() => (arcsOn && home ? buildArcCollection(home, groups.values()) : null), [arcsOn, home, groups]);
@@ -152,12 +158,12 @@ export function GlobeView() {
     if (el && el.hasAttribute("data-map-moving") !== moving) el.toggleAttribute("data-map-moving", moving);
   };
 
-  const dataReady = !peopleQuery.isPending && !profileQuery.isPending;
+  const dataReady = !peoplePending && !profileQuery.isPending;
   const onMap = filtered.length - withoutCity;
   const located = useMemo(() => people.reduce((n, p) => n + (p.homeLocation ? 1 : 0), 0), [people]);
   const filtering = !isEmpty(filters);
   const cityCount = plural(groups.size, "city", "cities");
-  const subtitle = peopleQuery.isPending
+  const subtitle = peoplePending
     ? "Loading…"
     : filtering
       ? `${onMap.toLocaleString()} of ${plural(located, "person", "people")} · ${cityCount}`
@@ -189,7 +195,7 @@ export function GlobeView() {
 
       <MapHeader ref={header} title="Globe" subtitle={subtitle}>
         <FilterBar variant="map" filters={filters} onChange={onFiltersChange} people={people} facets={GLOBE_FACETS} showSearch />
-        {withoutCity > 0 && !peopleQuery.isPending && (
+        {withoutCity > 0 && !peoplePending && (
           <Link
             href="/people"
             className="glass-map specular pointer-events-auto inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-footnote font-medium text-fg-2 hover:text-fg"

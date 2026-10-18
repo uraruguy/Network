@@ -9,8 +9,11 @@ import { isWriteTool, toolLabel, type ToolState } from "./tool-labels";
 
 export type ToolCall = { id: string; name: string; state: ToolState; output?: unknown; errorText?: string };
 
-/** A row of tool-call pills: spinner while running, then a check (or alert) and a short summary. */
-export const ToolPills = memo(function ToolPills({ calls }: { calls: ToolCall[] }) {
+/**
+ * A row of tool-call pills: spinner while running, then a check (or alert) and a short summary.
+ * Only pills of the answer being streamed pop in; a reopened thread shows its pills as they are.
+ */
+export const ToolPills = memo(function ToolPills({ calls, animateIn = false }: { calls: ToolCall[]; animateIn?: boolean }) {
   const safe = useMotionSafe();
   return (
     <div className="flex flex-wrap gap-1.5" aria-live="polite">
@@ -22,7 +25,7 @@ export const ToolPills = memo(function ToolPills({ calls }: { calls: ToolCall[] 
           <motion.span
             key={c.id}
             layout={safe ? "position" : false}
-            initial={safe ? { opacity: 0, scale: 0.92, y: 4 } : { opacity: 0 }}
+            initial={!animateIn ? false : safe ? { opacity: 0, scale: 0.92, y: 4 } : { opacity: 0 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             transition={spring.snappy}
             title={error ?? c.errorText ?? undefined}

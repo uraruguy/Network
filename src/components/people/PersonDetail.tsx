@@ -51,6 +51,7 @@ import { useNow } from "@/lib/clock";
 import { formatDate, formatRelative, localTimeIn } from "@/lib/format";
 import { displayTitle } from "@/lib/notes/title";
 import { useCategories, usePersonProfile, usePersonWrites } from "@/lib/queries/people";
+import { useCacheReady } from "@/lib/offline/useCacheReady";
 import { isTempId } from "@/lib/queries/people-cache";
 import { useActivities } from "@/lib/queries/taxonomy";
 import type { IndexLocation, PersonDetailApi, PersonIndexRow } from "@/lib/queries/types";
@@ -129,13 +130,17 @@ export function PersonDetail({ id }: { id: string }) {
     if (deepLink) router.replace(`/people/${id}`, { scroll: false });
   }, [deepLink, id, router]);
 
-  const head: Head | undefined = person ?? preview;
+  // Cached data only once it may render (after hydration and the IndexedDB restore — see
+  // useCacheReady): the server never has it, so the first render must match its skeleton. On
+  // client navigations this is true immediately, so the hero (and the avatar morph) is there.
+  const cacheReady = useCacheReady();
+  const head: Head | undefined = cacheReady ? (person ?? preview) : undefined;
   const compact = useScrolledPast(nameRef, !!head);
 
   const back = () => (window.history.length > 1 ? router.back() : router.push("/people"));
 
   if (!head) {
-    if (notFound) {
+    if (cacheReady && notFound) {
       return (
         <div className="mx-auto max-w-2xl">
           <TopBar onBack={back} title="" compact={false} />

@@ -32,3 +32,11 @@ export function useQueryReady(query: { data: unknown; isPending: boolean }): boo
   const ready = useCacheReady();
   return ready && !(query.isPending && query.data === undefined);
 }
+
+/**
+ * A query's data, held back (undefined) until cached data may render — for UI that shows
+ * placeholders rather than a skeleton: `const profile = useReadyData(useProfile());`
+ */
+export function useReadyData<T>(query: { data: T | undefined }): T | undefined {
+  return useCacheReady() ? query.data : undefined;
+}

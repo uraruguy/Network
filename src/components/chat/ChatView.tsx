@@ -6,6 +6,7 @@ import { useCallback, useState, useSyncExternalStore } from "react";
 import { IconButton } from "@/components/ui/IconButton";
 import { SkeletonText } from "@/components/ui/Skeleton";
 import { Tooltip } from "@/components/ui/Tooltip";
+import { useCacheReady, useReadyData } from "@/lib/offline/useCacheReady";
 import { useChatThread, useChatTurnFinished } from "@/lib/queries/chat";
 import { useProfile } from "@/lib/queries/misc";
 import { usePersonDetail } from "@/lib/queries/people";
@@ -65,10 +66,14 @@ export function ChatView() {
   const threadId = urlThread ?? freshId;
   const isFresh = threadId === freshId;
 
+  // Cached data only once it may render (see useCacheReady): the server render and the
+  // hydration render then agree (thread skeleton, generic starters).
+  const cacheReady = useCacheReady();
   const thread = useChatThread(isFresh ? null : threadId);
-  const personId = urlPerson ?? thread.data?.personId ?? null;
-  const { data: person } = usePersonDetail(personId);
-  const { data: profile } = useProfile();
+  const threadData = cacheReady ? thread.data : undefined;
+  const personId = urlPerson ?? threadData?.personId ?? null;
+  const person = useReadyData(usePersonDetail(personId));
+  const profile = useReadyData(useProfile());
   const [model, setModel] = useModelChoice();
   const [historyOpen, setHistoryOpen] = useState(false);
   const turnFinished = useChatTurnFinished();
@@ -89,8 +94,8 @@ export function ChatView() {
   );
 
   const homeCity = profile?.homeLocation?.name ?? null;
-  const loading = !isFresh && thread.isPending;
-  const notFound = !isFresh && thread.isError;
+  const loading = !isFresh && (!cacheReady || thread.isPending);
+  const notFound = cacheReady && !isFresh && thread.isError;
 
   return (
     <div className="flex h-[calc(100dvh-84px-var(--sab)-12px-var(--sat))] flex-col lg:h-[calc(100dvh-64px)]">
@@ -132,7 +137,7 @@ export function ChatView() {
         <ChatSession
           key={threadId}
           threadId={threadId}
-          initialMessages={isFresh ? [] : ((thread.data?.messages ?? []) as UIMessage[])}
+          initialMessages={isFresh ? [] : ((threadData?.messages ?? []) as UIMessage[])}
           personId={isFresh ? urlPerson : null}
           personName={person?.displayName ?? null}
           homeCity={homeCity}
