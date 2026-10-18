@@ -107,6 +107,11 @@ The server publishes `/.well-known/oauth-protected-resource` (RFC 9728) pointing
 
 ## Testing locally
 
+Tokens work against `pnpm dev` as is. The local Supabase (`supabase/config.toml`) also runs the OAuth
+server with dynamic client registration and `/oauth/consent` as the authorization path, so the OAuth
+flow can be tried with a local MCP client such as the MCP Inspector (`npx @modelcontextprotocol/inspector`).
+Hosted clients like claude.ai can't reach `localhost`.
+
 ```bash
 # create a token while signed in (or use Settings → Connected apps)
 curl -s -X POST http://localhost:3100/api/tokens -H 'content-type: application/json' \
