@@ -8,7 +8,7 @@ const SOURCE = /^[a-z0-9-]{1,40}$/;
 
 export async function generateMetadata({ params }: PageProps<"/import/[source]">) {
   const { source } = await params;
-  return { title: SOURCE.test(source) ? `Review · ${sourceLabel(source)}` : "Import" };
+  return { title: SOURCE.test(source) && !UUID.test(source) ? `Review · ${sourceLabel(source)}` : "Import" };
 }
 
 /** Review screen for one import source; old /import/<jobId> links land on Apple Notes. */

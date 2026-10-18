@@ -209,7 +209,7 @@ function ReadyView({ dry, toReview, onReview, onCommit, onRecheck }: { dry: Comm
       <EmptyState
         compact
         icon={<CheckCircle2 />}
-        title="Nothing to import yet"
+        title={toReview ? "Nothing to import yet" : "Everything is imported"}
         description={toReview ? `Approve people first — ${plural(toReview, "person", "people")} still to review.` : "Everyone approved is already in The Network."}
         action={
           toReview ? (
