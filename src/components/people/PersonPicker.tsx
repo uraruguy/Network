@@ -3,7 +3,6 @@ import { useCallback } from "react";
 import { Avatar } from "@/components/glass/Avatar";
 import { Combobox, filterByQuery } from "@/components/ui/Combobox";
 import { usePeopleIndex } from "@/lib/queries/people";
-import { guardComboboxEscape } from "./CityPicker";
 
 export type PersonPick = { id: string; displayName: string; avatarUrl?: string | null; headline?: string | null; company?: string | null };
 
@@ -32,29 +31,27 @@ export function PersonPicker({ value, onChange, placeholder = "Search people", e
     [people, excludeKey],
   );
   return (
-    <div className="contents" onKeyDownCapture={guardComboboxEscape}>
-      <Combobox<PersonPick>
-        id={id}
-        value={value}
-        onChange={onChange}
-        search={search}
-        getKey={(p) => p.id}
-        getLabel={(p) => p.displayName}
-        placeholder={placeholder}
-        emptyText="No one by that name"
-        autoFocus={autoFocus}
-        invalid={aria["aria-invalid"]}
-        aria-label={aria["aria-label"] ?? placeholder}
-        renderItem={(p) => (
-          <span className="flex min-w-0 items-center gap-2.5">
-            <Avatar name={p.displayName} src={p.avatarUrl} size={28} />
-            <span className="min-w-0">
-              <span className="block truncate">{p.displayName}</span>
-              {(p.headline || p.company) && <span className="block truncate text-footnote text-fg-3">{[p.headline, p.company].filter(Boolean).join(" · ")}</span>}
-            </span>
+    <Combobox<PersonPick>
+      id={id}
+      value={value}
+      onChange={onChange}
+      search={search}
+      getKey={(p) => p.id}
+      getLabel={(p) => p.displayName}
+      placeholder={placeholder}
+      emptyText="No one by that name"
+      autoFocus={autoFocus}
+      invalid={aria["aria-invalid"]}
+      aria-label={aria["aria-label"] ?? placeholder}
+      renderItem={(p) => (
+        <span className="flex min-w-0 items-center gap-2.5">
+          <Avatar name={p.displayName} src={p.avatarUrl} size={28} />
+          <span className="min-w-0">
+            <span className="block truncate">{p.displayName}</span>
+            {(p.headline || p.company) && <span className="block truncate text-footnote text-fg-3">{[p.headline, p.company].filter(Boolean).join(" · ")}</span>}
           </span>
-        )}
-      />
-    </div>
+        </span>
+      )}
+    />
   );
 }

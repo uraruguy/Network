@@ -129,6 +129,23 @@ export function Combobox<T>(props: ComboboxProps<T>) {
   const toKey = (x: T | CreateItem) => (isCreate(x) ? `__create:${x.__create}` : getKey(x));
   const toLabel = (x: T | CreateItem) => (isCreate(x) ? x.__create : getLabel(x));
 
+  const input = (
+    <BaseCombobox.Input
+      placeholder={props.multiple && props.value.length ? undefined : placeholder}
+      aria-label={props["aria-label"]}
+      autoFocus={autoFocus}
+      autoComplete="off"
+      enterKeyHint="search"
+      onKeyDown={(e) => {
+        // Base UI clears the selection on Escape while the popup is closed, so "Escape to dismiss
+        // the sheet" would silently wipe the field. Skip that: the key reaches the sheet instead.
+        // (With the popup open, Escape still just closes the popup.)
+        if (e.key === "Escape" && e.currentTarget.getAttribute("aria-expanded") !== "true") e.preventBaseUIHandler();
+      }}
+      className="h-8 min-w-24 flex-1 bg-transparent text-body text-fg outline-none placeholder:text-fg-4"
+    />
+  );
+
   return (
     <BaseCombobox.Root<T | CreateItem, boolean>
       items={items}
@@ -140,8 +157,14 @@ export function Combobox<T>(props: ComboboxProps<T>) {
         setQuery(v);
         if (d.reason !== "item-press") run(v);
       }}
-      onOpenChange={(open) => {
-        if (open) run(props.multiple ? query : "");
+      onOpenChange={(open, d) => {
+        // Typing opens the popup right after it ran (or scheduled) its own search; running
+        // another one here would cancel that pending debounced search.
+        if (!open || d.reason === "input-change") return;
+        // Opened by click/arrow keys: search what's typed, or everything when the field just
+        // shows the current selection.
+        const showsSelection = !props.multiple && props.value !== null && query === getLabel(props.value);
+        run(showsSelection ? "" : query);
       }}
       itemToStringLabel={toLabel}
       isItemEqualToValue={(a, b) => toKey(a) === toKey(b)}
@@ -157,7 +180,9 @@ export function Combobox<T>(props: ComboboxProps<T>) {
           className,
         )}
       >
-        {props.multiple && (
+        {props.multiple ? (
+          // The input sits inside Chips: Base UI's Backspace-removes-the-last-chip and arrow-key
+          // chip navigation only work there.
           <BaseCombobox.Chips className="contents">
             {props.value.map((item) => (
               <BaseCombobox.Chip
@@ -170,16 +195,11 @@ export function Combobox<T>(props: ComboboxProps<T>) {
                 </BaseCombobox.ChipRemove>
               </BaseCombobox.Chip>
             ))}
+            {input}
           </BaseCombobox.Chips>
+        ) : (
+          input
         )}
-        <BaseCombobox.Input
-          placeholder={props.multiple && props.value.length ? undefined : placeholder}
-          aria-label={props["aria-label"]}
-          autoFocus={autoFocus}
-          autoComplete="off"
-          enterKeyHint="search"
-          className="h-8 min-w-24 flex-1 bg-transparent text-body text-fg outline-none placeholder:text-fg-4"
-        />
         {loading && <Spinner size={16} className="text-fg-3" />}
         {!props.multiple && props.value && !loading && (
           <BaseCombobox.Clear aria-label="Clear" className="grid size-6 place-items-center rounded-full bg-fill-2 text-fg-3 hover:bg-fill-3">
