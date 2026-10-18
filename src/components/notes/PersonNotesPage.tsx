@@ -1,12 +1,13 @@
 "use client";
 import { ChevronLeft } from "lucide-react";
 import Link from "next/link";
+import { useReadyData } from "@/lib/offline/useCacheReady";
 import { usePersonDetail } from "@/lib/queries/people";
 import { PersonNotesSection } from "./PersonNotesSection";
 
 /** /people/[id]/notes — a person's notes on their own page. */
 export function PersonNotesPage({ personId }: { personId: string }) {
-  const { data: person } = usePersonDetail(personId);
+  const person = useReadyData(usePersonDetail(personId));
   const name = person?.displayName ?? "";
   return (
     <div className="mx-auto max-w-[720px] space-y-4 pb-8">

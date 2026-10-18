@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/shell/PageHeader";
 import { RelativeTime } from "@/components/ui/RelativeTime";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { toast } from "@/components/ui/Toast";
+import { useReadyData } from "@/lib/offline/useCacheReady";
 import { useImportStatus, useIngestExport, type ImportStatus, type IngestResult } from "@/lib/queries/import-review";
 import { cn } from "@/lib/utils";
 import { QuickImportSheet } from "./QuickImportSheet";
@@ -70,8 +71,9 @@ function SourceCard({ icon, tint, title, description, action, children, classNam
 /* ------------------------------------------------------------------ */
 
 function AppleNotesCard() {
-  const { data, isLoading } = useImportStatus("apple-notes");
-  if (isLoading || !data)
+  // Cached status only once it may render (see useCacheReady): server HTML and hydration agree.
+  const data = useReadyData(useImportStatus("apple-notes"));
+  if (!data)
     return (
       <section className="surface space-y-3 rounded-lg p-4 sm:p-5">
         <div className="flex items-center gap-3.5">
