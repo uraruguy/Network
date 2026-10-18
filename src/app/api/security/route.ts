@@ -12,4 +12,4 @@ export const GET = withOwner(async ({ ownerId, owner }): Promise<SecurityOvervie
     passkeyRequired: passkeyRequired(),
     mfaVerified: owner.mfaVerified,
   };
-});
+}, { fresh: true });

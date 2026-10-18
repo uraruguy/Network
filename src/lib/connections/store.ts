@@ -3,7 +3,7 @@ import { createHash, createHmac } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import { hkdfKey } from "@/lib/crypto/keys";
-import { decryptSecret, encryptSecret, SecretDecryptError, secretHint } from "@/lib/crypto/secrets";
+import { decryptSecret, encryptSecret, SecretDecryptError, secretHint, type SecretContext } from "@/lib/crypto/secrets";
 
 /**
  * Per-owner connections to outside services (AI provider, e-mail sender), stored in the
@@ -16,6 +16,9 @@ import { decryptSecret, encryptSecret, SecretDecryptError, secretHint } from "@/
  * `config.check` remembers the last connection test — which source it tested, a fingerprint of
  * the tested settings, latency and model — so a test result only counts while the settings it
  * tested are still the active ones.
+ *
+ * APP_SECRET rotation: a secret that only APP_SECRET_PREVIOUS can open is re-encrypted with the
+ * current key the next time it is loaded or saved (`openStoredSecret`).
  */
 
 const { connections } = schema;
@@ -83,9 +86,50 @@ export function fingerprint(parts: (string | number | boolean | null | undefined
     : createHash("sha256").update(`network:fingerprint:${data}`).digest("hex").slice(0, 24);
 }
 
-/* ---------- reads ---------- */
+/* ---------- secrets & APP_SECRET rotation ---------- */
 
 type Row = typeof connections.$inferSelect;
+
+export type OpenedSecret = {
+  secret: string | null;
+  error: string | null;
+  /** The secret re-encrypted with the current APP_SECRET when only APP_SECRET_PREVIOUS opened it. */
+  reencrypted: string | null;
+};
+
+/**
+ * Decrypts a stored secret and notices when it was written under APP_SECRET_PREVIOUS, returning a
+ * replacement token under the current key — so stored keys survive a rotation once
+ * APP_SECRET_PREVIOUS is dropped. Pure (env is a parameter).
+ */
+export function openStoredSecret(token: string, ctx: SecretContext, env: Record<string, string | undefined> = process.env): OpenedSecret {
+  try {
+    return { secret: decryptSecret(token, ctx, { ...env, APP_SECRET_PREVIOUS: undefined }), error: null, reencrypted: null };
+  } catch {
+    // Not under the current key: try the previous one.
+  }
+  try {
+    const secret = decryptSecret(token, ctx, env);
+    return { secret, error: null, reencrypted: encryptSecret(secret, ctx, env) };
+  } catch (err) {
+    return { secret: null, error: err instanceof SecretDecryptError ? err.message : "Could not decrypt the stored secret", reencrypted: null };
+  }
+}
+
+/** Stores a re-encrypted secret unless the row changed meanwhile (compare-and-swap on the old token). */
+async function storeReencrypted(row: Row, token: string) {
+  try {
+    await db
+      .update(connections)
+      .set({ secretEnc: token })
+      .where(and(eq(connections.ownerId, row.ownerId), eq(connections.kind, row.kind), eq(connections.secretEnc, row.secretEnc!)));
+    clearConnectionCache();
+  } catch (err) {
+    console.error("[connections] could not re-encrypt a stored secret", err);
+  }
+}
+
+/* ---------- reads ---------- */
 
 function splitConfig(config: unknown): { config: Record<string, unknown>; check: ConnectionCheck | null } {
   const obj = config && typeof config === "object" && !Array.isArray(config) ? { ...(config as Record<string, unknown>) } : {};
@@ -94,17 +138,10 @@ function splitConfig(config: unknown): { config: Record<string, unknown>; check:
   return { config: obj, check };
 }
 
-function toStored(row: Row): StoredConnection {
+function toStored(row: Row, opened: OpenedSecret | null): StoredConnection {
   const { config, check } = splitConfig(row.config);
-  let secret: string | null = null;
-  let secretError: string | null = null;
-  if (row.secretEnc) {
-    try {
-      secret = decryptSecret(row.secretEnc, { ownerId: row.ownerId, kind: row.kind, provider: row.provider });
-    } catch (err) {
-      secretError = err instanceof SecretDecryptError ? err.message : "Could not decrypt the stored secret";
-    }
-  }
+  const secret = opened?.secret ?? null;
+  const secretError = opened?.error ?? null;
   return {
     ownerId: row.ownerId,
     kind: row.kind,
@@ -122,7 +159,8 @@ function toStored(row: Row): StoredConnection {
 
 /**
  * The stored connection of `kind` for `ownerId` — or, without an owner (cron, background jobs in
- * this single-user app), the most recently updated one. Not cached; see `cached()`.
+ * this single-user app), the most recently updated one. Not cached; see `cached()`. A secret still
+ * under APP_SECRET_PREVIOUS is re-encrypted with the current key on the way (rotation, README).
  */
 export async function loadConnection(kind: ConnectionKind, ownerId?: string): Promise<StoredConnection | null> {
   const [row] = await db
@@ -131,7 +169,10 @@ export async function loadConnection(kind: ConnectionKind, ownerId?: string): Pr
     .where(ownerId ? and(eq(connections.kind, kind), eq(connections.ownerId, ownerId)) : eq(connections.kind, kind))
     .orderBy(desc(connections.updatedAt))
     .limit(1);
-  return row ? toStored(row) : null;
+  if (!row) return null;
+  const opened = row.secretEnc ? openStoredSecret(row.secretEnc, { ownerId: row.ownerId, kind: row.kind, provider: row.provider }) : null;
+  if (opened?.reencrypted) await storeReencrypted(row, opened.reencrypted);
+  return toStored(row, opened);
 }
 
 /* ---------- writes ---------- */
@@ -145,8 +186,9 @@ export type SaveConnectionInput = {
 
 /**
  * Upserts the owner's connection. Always sets `ownerId` explicitly. Changing the provider drops a
- * kept secret (it belonged to the other provider and its AAD no longer matches). Resets the
- * verification state — the new settings haven't been tested.
+ * kept secret (it belonged to the other provider and its AAD no longer matches); a kept secret is
+ * re-encrypted with the current APP_SECRET (an unreadable one is kept as is, never destroyed).
+ * Resets the verification state — the new settings haven't been tested.
  */
 export async function saveConnection(ownerId: string, kind: ConnectionKind, input: SaveConnectionInput): Promise<void> {
   const [existing] = await db.select().from(connections).where(and(eq(connections.ownerId, ownerId), eq(connections.kind, kind)));
@@ -156,8 +198,8 @@ export async function saveConnection(ownerId: string, kind: ConnectionKind, inpu
     const value = input.secret.trim();
     secretEnc = encryptSecret(value, { ownerId, kind, provider: input.provider });
     hint = secretHint(value);
-  } else if (input.secret === undefined && existing && existing.provider === input.provider) {
-    secretEnc = existing.secretEnc;
+  } else if (input.secret === undefined && existing?.secretEnc && existing.provider === input.provider) {
+    secretEnc = openStoredSecret(existing.secretEnc, { ownerId, kind, provider: input.provider }).reencrypted ?? existing.secretEnc;
     hint = existing.secretHint;
   }
   const values = { provider: input.provider, config: input.config, secretEnc, secretHint: hint, verifiedAt: null, lastError: null };

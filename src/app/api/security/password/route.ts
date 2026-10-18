@@ -30,4 +30,4 @@ export const POST = withOwner(async ({ ownerId, owner, req }) => {
   // Best effort: a stolen session elsewhere shouldn't outlive a password change.
   const { error: signOutError } = await supabase.auth.signOut({ scope: "others" });
   return { ok: true, otherSessionsSignedOut: !signOutError };
-});
+}, { fresh: true });

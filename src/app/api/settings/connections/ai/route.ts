@@ -13,7 +13,7 @@ const body = z.object({
 });
 
 /** → AiConnectionView (secrets never leave the server; only `secretHint`). */
-export const GET = withOwner(async ({ ownerId }) => getAiConnectionView(ownerId));
+export const GET = withOwner(async ({ ownerId }) => getAiConnectionView(ownerId), { fresh: true });
 
 /** Save the AI connection (409 when the environment manages it) → AiConnectionView. */
 export const PUT = withOwner(async ({ ownerId, req }) => {
@@ -26,4 +26,4 @@ export const PUT = withOwner(async ({ ownerId, req }) => {
   }
   await withSecretErrors(() => saveAiConnection(ownerId, { ...input, apiKey: input.apiKey === null ? "" : input.apiKey }));
   return getAiConnectionView(ownerId);
-});
+}, { fresh: true });

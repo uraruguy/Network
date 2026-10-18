@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const tokens = vi.hoisted(() => ({ findTokenRecord: vi.fn(), touchToken: vi.fn(async () => {}) }));
 const grants = vi.hoisted(() => ({ findGrantRecord: vi.fn(), touchGrant: vi.fn(async () => {}) }));
-const claims = vi.hoisted(() => ({ verifyBearer: vi.fn() }));
+const supa = vi.hoisted(() => ({ getClaims: vi.fn() }));
+const log = vi.hoisted(() => ({ approvalEvidence: vi.fn() }));
 vi.mock("@/lib/data/api-tokens", () => tokens);
 vi.mock("@/lib/data/oauth-grants", () => grants);
-vi.mock("@/lib/auth/claims", () => claims);
+vi.mock("@supabase/supabase-js", () => ({ createClient: () => ({ auth: { getClaims: supa.getClaims } }) }));
+vi.mock("./approval-log", () => log);
 vi.mock("next/server", () => ({ after: (fn: () => unknown) => void fn() }));
 
 import { forgetGrant, toolCtxFromAuth, verifyToken } from "./auth";
@@ -74,49 +76,104 @@ describe("verifyToken — personal access tokens", () => {
 });
 
 describe("verifyToken — OAuth access tokens", () => {
-  const sessionClaims = (clientId: string | null) => ({ sub: OWNER, sessionId: "s1", aal: "aal1", email: null, clientId });
+  const EXCHANGED = 1_792_000_000; // unix seconds of the code exchange
+  /** Raw JWT claims as Supabase issues them to an OAuth client. */
+  const jwt = (clientId: string | null, over: Record<string, unknown> = {}) => ({
+    data: {
+      claims: {
+        sub: OWNER,
+        role: "authenticated",
+        session_id: `session-${clientId}`,
+        aal: "aal1",
+        ...(clientId ? { client_id: clientId } : {}),
+        amr: [{ method: "oauth_provider/authorization_code", timestamp: EXCHANGED }],
+        ...over,
+      },
+    },
+    error: null,
+  });
+  const grant = (clientId: string, over: Record<string, unknown> = {}) => ({ clientId, clientName: "Claude", scopes: ["network:read"], revokedAt: null, timezone: "UTC", ...over });
+  const approved = { approvedAt: new Date((EXCHANGED - 20) * 1000), revokedAt: null };
+
+  beforeEach(() => log.approvalEvidence.mockResolvedValue(approved));
 
   it("rejects browser-session JWTs (no client_id)", async () => {
-    claims.verifyBearer.mockResolvedValue(sessionClaims(null));
+    supa.getClaims.mockResolvedValue(jwt(null));
     expect(await verifyToken(req, "eyJ.session.jwt")).toBeUndefined();
     expect(grants.findGrantRecord).not.toHaveBeenCalled();
   });
 
   it("rejects tokens that fail verification", async () => {
-    claims.verifyBearer.mockResolvedValue(null);
+    supa.getClaims.mockResolvedValue({ data: null, error: new Error("bad signature") });
+    expect(await verifyToken(req, "eyJ.bad")).toBeUndefined();
+    supa.getClaims.mockRejectedValue(new Error("JWKS unreachable"));
     expect(await verifyToken(req, "eyJ.bad")).toBeUndefined();
   });
 
   it("takes scopes from the owner's grant, not from the token", async () => {
-    claims.verifyBearer.mockResolvedValue(sessionClaims("client-a"));
-    grants.findGrantRecord.mockResolvedValue({ clientId: "client-a", clientName: "Claude", scopes: ["network:read"], revokedAt: null, timezone: "UTC" });
+    supa.getClaims.mockResolvedValue(jwt("client-a", { scope: "network:write" }));
+    grants.findGrantRecord.mockResolvedValue(grant("client-a"));
     const info = await verifyToken(req, "eyJ.oauth.a");
     expect(info?.scopes).toEqual(["network:read"]);
     expect(grants.findGrantRecord).toHaveBeenCalledWith(OWNER, "client-a");
+    expect(log.approvalEvidence).toHaveBeenCalledWith(OWNER, "client-a", new Date(EXCHANGED * 1000));
     expect(toolCtxFromAuth(info).actor).toEqual({ via: "mcp", client: "Claude", credential: "oauth:client-a" });
   });
 
   it("rejects clients without a grant or with a revoked one", async () => {
-    claims.verifyBearer.mockResolvedValue(sessionClaims("client-b"));
+    supa.getClaims.mockResolvedValue(jwt("client-b"));
     grants.findGrantRecord.mockResolvedValueOnce(null);
     expect(await verifyToken(req, "eyJ.oauth.b")).toBeUndefined();
 
-    claims.verifyBearer.mockResolvedValue(sessionClaims("client-c"));
-    grants.findGrantRecord.mockResolvedValueOnce({ clientId: "client-c", clientName: "X", scopes: ["network:write"], revokedAt: new Date(), timezone: null });
+    supa.getClaims.mockResolvedValue(jwt("client-c"));
+    grants.findGrantRecord.mockResolvedValueOnce(grant("client-c", { scopes: ["network:write"], revokedAt: new Date(), timezone: null }));
     expect(await verifyToken(req, "eyJ.oauth.c")).toBeUndefined();
   });
 
-  it("caches grant lookups briefly, and forgetGrant drops the cache", async () => {
-    claims.verifyBearer.mockResolvedValue(sessionClaims("client-d"));
-    grants.findGrantRecord.mockResolvedValue({ clientId: "client-d", clientName: "Cursor", scopes: ["network:read"], revokedAt: null, timezone: null });
+  it("refuses sessions minted without a passkey-verified approval (password-only Supabase session)", async () => {
+    supa.getClaims.mockResolvedValue(jwt("client-e"));
+    grants.findGrantRecord.mockResolvedValue(grant("client-e"));
+    log.approvalEvidence.mockResolvedValueOnce({ approvedAt: null, revokedAt: null });
+    expect(await verifyToken(req, "eyJ.oauth.e")).toBeUndefined();
+  });
+
+  it("refuses sessions minted before a disconnect, even after the app was approved again", async () => {
+    supa.getClaims.mockResolvedValue(jwt("client-f"));
+    grants.findGrantRecord.mockResolvedValue(grant("client-f"));
+    log.approvalEvidence.mockResolvedValueOnce({ approvedAt: approved.approvedAt, revokedAt: new Date((EXCHANGED + 3600) * 1000) });
+    expect(await verifyToken(req, "eyJ.oauth.f")).toBeUndefined();
+  });
+
+  it("fails closed when the token doesn't say when its session was created", async () => {
+    supa.getClaims.mockResolvedValue(jwt("client-g", { amr: [{ method: "password", timestamp: EXCHANGED }] }));
+    grants.findGrantRecord.mockResolvedValue(grant("client-g"));
+    expect(await verifyToken(req, "eyJ.oauth.g")).toBeUndefined();
+    expect(log.approvalEvidence).not.toHaveBeenCalled();
+  });
+
+  it("falls back to UTC for a broken profile time zone", async () => {
+    supa.getClaims.mockResolvedValue(jwt("client-h"));
+    grants.findGrantRecord.mockResolvedValue(grant("client-h", { timezone: "Mars/Olympus_Mons" }));
+    expect(toolCtxFromAuth(await verifyToken(req, "eyJ.oauth.h")).timezone).toBe("UTC");
+  });
+
+  it("caches grant and approval lookups briefly, and forgetGrant drops both", async () => {
+    supa.getClaims.mockResolvedValue(jwt("client-d"));
+    grants.findGrantRecord.mockResolvedValue(grant("client-d", { clientName: "Cursor", timezone: null }));
     await verifyToken(req, "eyJ.oauth.d");
     await verifyToken(req, "eyJ.oauth.d");
     expect(grants.findGrantRecord).toHaveBeenCalledTimes(1);
+    expect(log.approvalEvidence).toHaveBeenCalledTimes(1);
 
     forgetGrant(OWNER, "client-d");
-    grants.findGrantRecord.mockResolvedValue({ clientId: "client-d", clientName: "Cursor", scopes: ["network:read"], revokedAt: new Date(), timezone: null });
+    grants.findGrantRecord.mockResolvedValue(grant("client-d", { clientName: "Cursor", revokedAt: new Date(), timezone: null }));
     expect(await verifyToken(req, "eyJ.oauth.d")).toBeUndefined();
     expect(grants.findGrantRecord).toHaveBeenCalledTimes(2);
+
+    forgetGrant(OWNER, "client-d");
+    grants.findGrantRecord.mockResolvedValue(grant("client-d", { clientName: "Cursor", timezone: null }));
+    expect(await verifyToken(req, "eyJ.oauth.d")).toBeDefined();
+    expect(log.approvalEvidence).toHaveBeenCalledTimes(2);
   });
 });
 

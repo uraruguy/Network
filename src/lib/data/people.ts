@@ -226,18 +226,24 @@ const LINKS = {
   tags: { link: personTags, column: "tag_id", target: tags },
 } as const;
 
-/** Makes the person's links exactly `ids`, ignoring ids that aren't the owner's. */
-async function replaceLinks(tx: Tx, kind: keyof typeof LINKS, ownerId: string, personId: string, ids: string[]) {
+/** Adds links to `ids` (keeping existing ones), ignoring ids that aren't the owner's. */
+async function addLinks(tx: Tx, kind: keyof typeof LINKS, ownerId: string, personId: string, ids: string[]) {
   const { link, column, target } = LINKS[kind];
-  const col = sql.identifier(column);
   const unique = [...new Set(ids)];
-  await tx.execute(
-    sql`delete from ${link} where owner_id = ${ownerId} and person_id = ${personId}${unique.length ? sql` and not (${col} in ${unique})` : sql``}`,
-  );
   if (!unique.length) return;
   await tx.execute(
-    sql`insert into ${link} (person_id, ${col}, owner_id) select ${personId}, t.id, ${ownerId} from ${target} t where t.owner_id = ${ownerId} and t.id in ${unique} on conflict do nothing`,
+    sql`insert into ${link} (person_id, ${sql.identifier(column)}, owner_id) select ${personId}, t.id, ${ownerId} from ${target} t where t.owner_id = ${ownerId} and t.id in ${unique} on conflict do nothing`,
   );
+}
+
+/** Makes the person's links exactly `ids`, ignoring ids that aren't the owner's. */
+async function replaceLinks(tx: Tx, kind: keyof typeof LINKS, ownerId: string, personId: string, ids: string[]) {
+  const { link, column } = LINKS[kind];
+  const unique = [...new Set(ids)];
+  await tx.execute(
+    sql`delete from ${link} where owner_id = ${ownerId} and person_id = ${personId}${unique.length ? sql` and not (${sql.identifier(column)} in ${unique})` : sql``}`,
+  );
+  await addLinks(tx, kind, ownerId, personId, unique);
 }
 
 /** Tag ids for names, creating missing tags (case-insensitive match) — lets offline clients tag by name. */
@@ -272,10 +278,22 @@ async function ownedPersonId(tx: Tx, ownerId: string, id: string | null | undefi
   return row?.id ?? null;
 }
 
+/**
+ * How a write changes a person's activities. Only an explicit `activityIds` replaces the set; the
+ * legacy v1 `hobbies`/`hobbiesOther` (import, old clients) can only add matching activities — a
+ * patch that knows nothing about activities must never clear them. Pure; tested.
+ */
+export function activityChange(input: Pick<PersonPatchData, "activityIds" | "hobbies" | "hobbiesOther">): { replace: string[] } | { addLegacy: { hobbies: string[]; other: string | null | undefined } } | null {
+  if (input.activityIds) return { replace: input.activityIds };
+  if (input.hobbies && (input.hobbies.length || input.hobbiesOther?.trim())) return { addLegacy: { hobbies: input.hobbies, other: input.hobbiesOther } };
+  return null;
+}
+
 async function applyRelations(tx: Tx, ownerId: string, personId: string, input: PersonPatchData) {
   if (input.categoryIds) await replaceLinks(tx, "categories", ownerId, personId, input.categoryIds);
-  const activityIds = input.activityIds ?? (input.hobbies !== undefined ? await legacyActivityIds(tx, ownerId, input.hobbies, input.hobbiesOther) : undefined);
-  if (activityIds) await replaceLinks(tx, "activities", ownerId, personId, activityIds);
+  const activities = activityChange(input);
+  if (activities && "replace" in activities) await replaceLinks(tx, "activities", ownerId, personId, activities.replace);
+  else if (activities) await addLinks(tx, "activities", ownerId, personId, await legacyActivityIds(tx, ownerId, activities.addLegacy.hobbies, activities.addLegacy.other));
   if (input.tagNames) await replaceLinks(tx, "tags", ownerId, personId, await tagIdsForNames(tx, ownerId, input.tagNames));
 }
 
@@ -342,7 +360,7 @@ export async function updatePerson(ownerId: string, id: string, patch: PersonPat
   return found ? getPerson(ownerId, id) : null;
 }
 
-/** Soft delete. Returns false if there was nothing to delete. */
+/** Soft delete. Returns false if there was nothing (left) to delete — callers treat that as done. */
 export async function deletePerson(ownerId: string, id: string): Promise<boolean> {
   const rows = await db
     .update(people)

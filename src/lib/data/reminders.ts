@@ -2,14 +2,25 @@ import "server-only";
 import { and, asc, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import type { ReminderData } from "@/lib/schemas";
+import { addDays, localDate, parseISODate, safeTimeZone, toISODate, zonedParts, zonedTimeToUtc, type ISODate } from "@/lib/time/zoned";
 import { OPEN_REMINDER_STATUSES } from "./people";
 
 /*
  * Follow-up reminders. `people.next_followup_at` is kept in sync by the `sync_next_followup`
- * database trigger, so nothing here has to maintain it.
+ * database trigger, so nothing here has to maintain it. Calendar math (snooze, repeats) runs on
+ * the owner's calendar (`profiles.timezone`), not the server's (UTC on Vercel).
  */
 
-const { reminders, people, notes } = schema;
+const { reminders, people, notes, profiles } = schema;
+
+/** Follow-ups land at 09:00 local time, like the rest of the app. */
+const DEFAULT_HOUR = 9;
+
+/** The owner's time zone, safe for Intl (unknown → UTC). */
+async function ownerTimeZone(ownerId: string): Promise<string> {
+  const [row] = await db.select({ timezone: profiles.timezone }).from(profiles).where(eq(profiles.id, ownerId));
+  return safeTimeZone(row?.timezone);
+}
 
 const personCols = { columns: { id: true, displayName: true, avatarUrl: true, headline: true, company: true } } as const;
 
@@ -66,35 +77,59 @@ export async function createReminder(ownerId: string, input: ReminderData) {
   return getReminder(ownerId, row!.id);
 }
 
-/** Next occurrence of a recurring reminder, or null when it doesn't recur. */
-export function nextDue(from: Date, recurrence: schema.Reminder["recurrence"], days: number | null) {
-  const d = new Date(from);
+/** `date` plus `months` on the calendar, clamped to the month's last day (31 Jan + 1 → 28/29 Feb). Pure. */
+export function addMonthsClamped(date: ISODate, months: number): ISODate {
+  const { year, month, day } = parseISODate(date);
+  const index = year * 12 + (month - 1) + months;
+  const y = Math.floor(index / 12);
+  const m = index - y * 12 + 1;
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return toISODate(y, m, Math.min(day, lastDay));
+}
+
+/**
+ * Next occurrence of a recurring reminder, or null when it doesn't recur: the calendar date of
+ * `from` in `timeZone` plus the interval (month ends clamped), at `timeOf`'s local time of day —
+ * a 09:00 follow-up stays at 09:00, across DST changes too. Pure.
+ */
+export function nextDue(from: Date, recurrence: schema.Reminder["recurrence"], days: number | null, timeZone = "UTC", timeOf: Date = from): Date | null {
+  const tz = safeTimeZone(timeZone);
+  const start = localDate(from, tz);
+  let date: ISODate;
   switch (recurrence) {
     case "monthly":
-      d.setMonth(d.getMonth() + 1);
-      return d;
+      date = addMonthsClamped(start, 1);
+      break;
     case "quarterly":
-      d.setMonth(d.getMonth() + 3);
-      return d;
+      date = addMonthsClamped(start, 3);
+      break;
     case "semiannual":
-      d.setMonth(d.getMonth() + 6);
-      return d;
+      date = addMonthsClamped(start, 6);
+      break;
     case "yearly":
-      d.setFullYear(d.getFullYear() + 1);
-      return d;
+      date = addMonthsClamped(start, 12);
+      break;
     case "custom_days":
-      d.setDate(d.getDate() + (days ?? 30));
-      return d;
+      date = addDays(start, days ?? 30);
+      break;
     default:
       return null;
   }
+  const { hour, minute } = zonedParts(timeOf, tz);
+  return zonedTimeToUtc(date, hour, minute, tz);
 }
 
-/** Marks done; recurring reminders roll forward to the next occurrence instead of closing. */
+/** `days` after today on the owner's calendar, at 09:00 local. Pure. */
+export function snoozeUntil(days: number, timeZone: string, now = new Date()): Date {
+  const tz = safeTimeZone(timeZone);
+  return zonedTimeToUtc(addDays(localDate(now, tz), days), DEFAULT_HOUR, 0, tz);
+}
+
+/** Marks done; recurring reminders roll forward (from today, at their usual local time) instead of closing. */
 export async function completeReminder(ownerId: string, id: string) {
   const r = await db.query.reminders.findFirst({ where: and(eq(reminders.ownerId, ownerId), eq(reminders.id, id)) });
   if (!r) return null;
-  const next = nextDue(new Date(), r.recurrence, r.recurrenceDays);
+  const next = r.recurrence === "none" ? null : nextDue(new Date(), r.recurrence, r.recurrenceDays, await ownerTimeZone(ownerId), r.dueAt);
   const scope = and(eq(reminders.ownerId, ownerId), eq(reminders.id, id));
   await db.transaction(async (tx) => {
     if (next) await tx.update(reminders).set({ dueAt: next, status: "pending", sentAt: null, doneAt: null }).where(scope);
@@ -107,11 +142,9 @@ export async function completeReminder(ownerId: string, id: string) {
   return getReminder(ownerId, id);
 }
 
-/** Pushes a reminder `days` ahead (09:00 server time). */
+/** Pushes a reminder to 09:00 local time, `days` after today in the owner's time zone. */
 export async function snoozeReminder(ownerId: string, id: string, days: number) {
-  const due = new Date();
-  due.setDate(due.getDate() + days);
-  due.setHours(9, 0, 0, 0);
+  const due = snoozeUntil(days, await ownerTimeZone(ownerId));
   const rows = await db
     .update(reminders)
     .set({ dueAt: due, status: "snoozed", sentAt: null })

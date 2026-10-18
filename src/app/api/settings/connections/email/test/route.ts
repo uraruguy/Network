@@ -10,4 +10,4 @@ export const POST = withOwner(async ({ ownerId, owner }) => {
   const to = (await getProfile(ownerId))?.email ?? owner.claims.email;
   if (!to) throw new HttpError(422, "Your account has no e-mail address to send the test to.");
   return testEmailConnection(ownerId, to, clientEnv.NEXT_PUBLIC_APP_URL);
-});
+}, { fresh: true });
