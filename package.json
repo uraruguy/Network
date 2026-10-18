@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "concurrently -p none \"serwist build --watch\" \"next dev -p 3100\"",
-    "build": "next build && serwist build",
+    "build": "next build && serwist build && tsx scripts/check-sw.ts",
     "start": "next start",
     "lint": "eslint .",
     "lint:design": "tsx scripts/check-design.ts",
