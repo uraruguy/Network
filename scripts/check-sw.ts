@@ -1,7 +1,7 @@
 /**
  * Post-build guard for the service worker (runs after `serwist build`).
  *   pnpm tsx scripts/check-sw.ts [public/sw.js]
- * Fails when the worker could never install, which silently costs the PWA its offline support:
+ * Fails on precache problems that silently cost the PWA its offline support:
  * - the same URL precached twice with different revisions: Serwist throws
  *   add-to-cache-list-conflicting-entries at startup (this shipped once with /~offline);
  * - a precached page that Next prerendered with a non-2xx status: Serwist refuses a >= 400
