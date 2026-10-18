@@ -1,11 +1,10 @@
 "use client";
 import { motion } from "motion/react";
 import { Sparkles } from "lucide-react";
-import { listItem, useMotionSafe } from "@/lib/motion";
+import { listItem } from "@/lib/motion";
 
 /** First screen of a conversation: what the assistant can do, plus one-tap starters. */
 export function ChatEmpty({ personName, homeCity, onPick }: { personName: string | null; homeCity: string | null; onPick: (text: string) => void }) {
-  const safe = useMotionSafe();
   const first = personName?.split(/\s+/)[0] ?? null;
   const suggestions = personName
     ? [
@@ -36,7 +35,9 @@ export function ChatEmpty({ personName, homeCity, onPick }: { personName: string
       </div>
       <ul className="grid w-full gap-2 sm:grid-cols-2">
         {suggestions.map((s, i) => (
-          <motion.li key={s} variants={listItem} custom={i} initial={safe ? "initial" : false} animate="animate">
+          // Same initial state on server and client (no hydration mismatch); MotionConfig's
+          // reducedMotion="user" drops the movement for people who asked for less.
+          <motion.li key={s} variants={listItem} custom={i} initial="initial" animate="animate">
             <button
               type="button"
               onClick={() => onPick(s)}
