@@ -3,6 +3,7 @@
 import { defaultCache } from "@serwist/next/worker";
 import type { PrecacheEntry, RuntimeCaching, SerwistGlobalConfig } from "serwist";
 import { CacheFirst, CacheableResponsePlugin, ExpirationPlugin, NetworkOnly, Serwist, StaleWhileRevalidate } from "serwist";
+import { directResponsesOnly } from "@/lib/offline/precache";
 
 declare global {
   interface WorkerGlobalScope extends SerwistGlobalConfig {
@@ -66,6 +67,8 @@ const runtimeCaching: RuntimeCaching[] = [
 
 const serwist = new Serwist({
   precacheEntries: self.__SW_MANIFEST,
+  // Signed out, app pages redirect to /login: fail the install rather than cache the sign-in page.
+  precacheOptions: { plugins: [directResponsesOnly] },
   skipWaiting: true,
   clientsClaim: true,
   navigationPreload: true,
