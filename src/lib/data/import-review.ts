@@ -8,6 +8,7 @@ import { z } from "zod";
 import { db as defaultDb, schema } from "@/lib/db";
 import { importItemsX, importMentions, importPeople, type ImportPerson } from "@/lib/db/schema-import";
 import { ProfileProposal, type ProfileProposal as Profile } from "@/lib/import/contracts";
+import { createGeocoder, type Geocoder } from "@/lib/import/geo";
 import { nameTokens, personKey } from "@/lib/import/names";
 import { mergeProfiles, readProfile } from "@/lib/import/profile";
 import { fileNotes } from "./import-resolve";
@@ -43,18 +44,31 @@ export async function reviewStats(db: DbOrTx, ownerId: string, source: string) {
     itemCounts[r.status] = (itemCounts[r.status] ?? 0) + r.n;
     if (r.status === "skipped") dismissed[r.reason || "unknown"] = (dismissed[r.reason || "unknown"] ?? 0) + r.n;
   }
-  const proposals = { review: 0, proposed: 0, approved: 0, rejected: 0, merged: 0, committed: 0, total: 0 };
+  const proposals = { review: 0, proposed: 0, approved: 0, autoApproved: 0, rejected: 0, merged: 0, committed: 0, total: 0 };
   for (const r of props) {
     proposals[r.status] += r.n;
     proposals.total += r.n;
     if (r.status === "proposed" && r.needsReview) proposals.review += r.n;
   }
+  const [auto] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(importPeople)
+    .where(and(eq(importPeople.ownerId, ownerId), eq(importPeople.source, source), eq(importPeople.status, "approved"), eq(importPeople.decidedBy, "auto")));
+  proposals.autoApproved = auto?.n ?? 0;
   return { source, items: itemCounts, dismissed, proposals, mentions: m };
 }
 
 /* ------------------------------------------------------------------ */
 /*  List                                                               */
 /* ------------------------------------------------------------------ */
+
+/** City lookup through search_cities (aliases, Slovenian locatives), cached per call. */
+export function dbGeocoder(db: DbOrTx): Geocoder {
+  return createGeocoder(async (q, lim) => {
+    const rows = (await db.execute(sql`select * from search_cities(${q}, ${lim})`)) as unknown as Record<string, unknown>[];
+    return rows.map((r) => ({ id: Number(r.id), name: String(r.name), admin: (r.admin as string) ?? null, country: String(r.country), countryCode: String(r.country_code), lat: Number(r.lat), lng: Number(r.lng), timezone: (r.timezone as string) ?? null }));
+  });
+}
 
 function tabWhere(tab: ReviewTab) {
   switch (tab) {
@@ -136,6 +150,15 @@ export async function listProposals(db: DbOrTx, ownerId: string, source: string,
     ]);
   }
 
+  // Geocoded home city ("Ljubljani" → Ljubljana, SI) for display.
+  const geo = dbGeocoder(db);
+  const places = new Map<string, { name: string; countryCode: string; country: string } | null>();
+  for (const r of page) {
+    const prof = readProfile(r.p.profile);
+    const hit = prof.city ? await geo(prof.city, prof.country).catch(() => null) : null;
+    places.set(r.p.id, hit ? { name: hit.name, countryCode: hit.countryCode, country: hit.country } : null);
+  }
+
   return {
     tab,
     items: page.map((r) => ({
@@ -155,6 +178,7 @@ export async function listProposals(db: DbOrTx, ownerId: string, source: string,
       committedPersonId: r.p.committedPersonId,
       mergedIntoId: r.p.mergedIntoId,
       profile: readProfile(r.p.profile),
+      place: places.get(r.p.id) ?? null,
       mentionCount: r.mentions,
       canUndo: Array.isArray(r.p.history) && r.p.history.length > 0,
       evidence: evidence
@@ -171,7 +195,8 @@ export async function listProposals(db: DbOrTx, ownerId: string, source: string,
 /* ------------------------------------------------------------------ */
 
 export const decisionInput = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("approve") }),
+  /** `matchPersonId` approves the proposal as an existing person (one-tap "merge into existing"). */
+  z.object({ action: z.literal("approve"), matchPersonId: z.string().uuid().nullable().optional() }),
   z.object({ action: z.literal("reject") }),
   z.object({ action: z.literal("passerby") }),
   z.object({ action: z.literal("reopen") }),
@@ -340,7 +365,10 @@ export async function decideProposal(ownerId: string, id: string, input: Decisio
     const affected = new Set([p.id]);
     switch (input.action) {
       case "approve":
-        await tx.update(importPeople).set({ status: "approved", disposition: "person", ...userDecided(), history: pushHistory(p, entry()) }).where(eq(importPeople.id, p.id));
+        await tx
+          .update(importPeople)
+          .set({ status: "approved", disposition: "person", ...(input.matchPersonId !== undefined ? { matchPersonId: input.matchPersonId } : {}), ...userDecided(), history: pushHistory(p, entry()) })
+          .where(eq(importPeople.id, p.id));
         break;
       case "reject":
         await tx.update(importPeople).set({ status: "rejected", ...userDecided(), history: pushHistory(p, entry()) }).where(eq(importPeople.id, p.id));
@@ -432,4 +460,106 @@ export async function getImportItem(db: DbOrTx, ownerId: string, id: string) {
     .leftJoin(importPeople, eq(importPeople.id, importMentions.importPersonId))
     .where(eq(importMentions.itemId, id));
   return { ...it, mentions };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Proposal detail (every mention — "All 12 notes", split dialog)     */
+/* ------------------------------------------------------------------ */
+
+export async function proposalEvidence(db: DbOrTx, ownerId: string, id: string) {
+  const [p] = await db
+    .select({ id: importPeople.id, displayName: importPeople.displayName, status: importPeople.status })
+    .from(importPeople)
+    .where(and(eq(importPeople.ownerId, ownerId), eq(importPeople.id, id)));
+  if (!p) return null;
+  const rows = (await db.execute(sql`
+    select m.id, m.item_id, m.surface, m.role, m.confidence, coalesce(m.excerpt, m.evidence) as snippet,
+           i.title, i.folders, coalesce(i.external_created_at, i.created_at) as date, i.gone_at is not null as gone
+    from import_mentions m join import_items i on i.id = m.item_id
+    where m.owner_id = ${ownerId} and m.import_person_id = ${id}::uuid
+    order by (m.role = 'primary') desc, coalesce(i.external_created_at, i.created_at) desc`)) as unknown as {
+    id: string;
+    item_id: string;
+    surface: string;
+    role: string;
+    confidence: number | null;
+    snippet: string | null;
+    title: string | null;
+    folders: string[];
+    date: string;
+    gone: boolean;
+  }[];
+  return {
+    ...p,
+    evidence: rows.map((e) => ({
+      mentionId: e.id,
+      itemId: e.item_id,
+      title: e.title,
+      folders: e.folders,
+      date: e.date,
+      surface: e.surface,
+      role: e.role,
+      confidence: e.confidence,
+      snippet: e.snippet,
+      gone: e.gone,
+    })),
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Merge targets (proposals + existing people, alias-aware)           */
+/* ------------------------------------------------------------------ */
+
+export type MergeTarget = {
+  kind: "proposal" | "person";
+  id: string;
+  displayName: string;
+  aliases: string[];
+  detail: string | null;
+  status: string | null;
+  mentions: number | null;
+};
+
+export async function searchMergeTargets(db: DbOrTx, ownerId: string, source: string, q: string, excludeId?: string | null): Promise<MergeTarget[]> {
+  const query = q.trim().slice(0, 100);
+  const like = `%${query.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
+  const proposals = (await db.execute(sql`
+    select p.id, p.display_name, p.aliases, p.status, p.profile->>'role' as role, p.profile->>'company' as company,
+           (select count(*)::int from import_mentions m where m.import_person_id = p.id) as mentions,
+           greatest(similarity(p.display_name, ${query}), coalesce((select max(similarity(a, ${query})) from unnest(p.aliases) a), 0)) as score
+    from import_people p
+    where p.owner_id = ${ownerId} and p.source = ${source} and p.status <> 'merged' and p.disposition = 'person'
+      ${excludeId ? sql`and p.id <> ${excludeId}::uuid` : sql``}
+      and (${query} = '' or unaccent(p.display_name) ilike unaccent(${like})
+           or exists (select 1 from unnest(p.aliases) a where unaccent(a) ilike unaccent(${like}))
+           or similarity(p.display_name, ${query}) > 0.35)
+    order by score desc, mentions desc, p.display_name
+    limit 8`)) as unknown as { id: string; display_name: string; aliases: string[]; status: string; role: string | null; company: string | null; mentions: number }[];
+  const people = (await db.execute(sql`
+    select id, display_name, headline, company, similarity(display_name, ${query}) as score
+    from people
+    where owner_id = ${ownerId} and deleted_at is null
+      and (${query} = '' or unaccent(display_name) ilike unaccent(${like}) or similarity(display_name, ${query}) > 0.35)
+    order by score desc, display_name
+    limit 8`)) as unknown as { id: string; display_name: string; headline: string | null; company: string | null }[];
+  return [
+    ...people.map((p) => ({
+      kind: "person" as const,
+      id: p.id,
+      displayName: p.display_name,
+      aliases: [],
+      detail: [p.headline, p.company].filter(Boolean).join(" · ") || null,
+      status: null,
+      mentions: null,
+    })),
+    ...proposals.map((p) => ({
+      kind: "proposal" as const,
+      id: p.id,
+      displayName: p.display_name,
+      aliases: p.aliases,
+      detail: [p.role, p.company].filter(Boolean).join(" · ") || null,
+      status: p.status,
+      mentions: p.mentions,
+    })),
+  ];
 }
