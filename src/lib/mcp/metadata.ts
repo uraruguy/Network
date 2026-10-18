@@ -1,11 +1,16 @@
 import { generateProtectedResourceMetadata, metadataCorsOptionsRequestHandler } from "mcp-handler";
-import { authServerIssuer, MCP_SCOPES, mcpResourceUrl, appOrigin } from "./config";
+import { authServerIssuer, mcpResourceUrl, appOrigin } from "./config";
 
 /**
  * OAuth Protected Resource Metadata (RFC 9728) for /api/mcp. Built with mcp-handler's
- * `generateProtectedResourceMetadata` (rather than `protectedResourceHandler`) so it can also
- * advertise `scopes_supported`. Served at both `/.well-known/oauth-protected-resource` and the
- * path-suffixed `/.well-known/oauth-protected-resource/api/mcp`.
+ * `generateProtectedResourceMetadata` (rather than `protectedResourceHandler`) so it can add a
+ * name and docs link. Served at both `/.well-known/oauth-protected-resource` and the path-suffixed
+ * `/.well-known/oauth-protected-resource/api/mcp`.
+ *
+ * Deliberately no `scopes_supported`: MCP clients copy it into the authorization request, and
+ * Supabase's OAuth server refuses any scope it doesn't know ("unsupported scope: network:read"),
+ * which broke the flow before the consent page. The access level is chosen on the consent page and
+ * stored on the grant (auth.ts), so the token's own scopes don't matter.
  */
 
 const CORS = {
@@ -19,7 +24,6 @@ export function protectedResourceResponse(): Response {
     authServerUrls: [authServerIssuer()],
     resourceUrl: mcpResourceUrl(),
     additionalMetadata: {
-      scopes_supported: [...MCP_SCOPES],
       bearer_methods_supported: ["header"],
       resource_name: "The Network",
       resource_documentation: `${appOrigin()}/settings#connected-apps`,
