@@ -40,7 +40,7 @@
     "@base-ui/react": "^1.9.0",
     "@modelcontextprotocol/server": "^2.3.1",
     "@openrouter/ai-sdk-provider": "^3.0.0",
-    "@serwist/next": "^9.5.12",
+    "@serwist/next": "^9.5.13",
     "@simplewebauthn/browser": "^14.0.0",
     "@simplewebauthn/server": "^14.0.3",
     "@supabase/ssr": "^0.12.7",
@@ -85,7 +85,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@serwist/cli": "^9.5.12",
+    "@serwist/cli": "^9.5.13",
     "@tailwindcss/postcss": "^4",
     "@types/geojson": "^7946.0.16",
     "@types/node": "^22.20.3",
