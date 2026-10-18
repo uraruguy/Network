@@ -48,6 +48,7 @@ import { Skeleton, SkeletonRows } from "@/components/ui/Skeleton";
 import { toast } from "@/components/ui/Toast";
 import { useNow } from "@/lib/clock";
 import { formatDate, formatRelative, localTimeIn } from "@/lib/format";
+import { displayTitle } from "@/lib/notes/title";
 import { useCategories, usePersonProfile, usePersonWrites } from "@/lib/queries/people";
 import { isTempId } from "@/lib/queries/people-cache";
 import { useActivities } from "@/lib/queries/taxonomy";
@@ -540,7 +541,7 @@ function Mentions({ person }: { person: PersonDetailApi }) {
         <ListRow
           key={note.id}
           icon={<FileText />}
-          label={note.title || note.excerpt?.split("\n")[0] || "Untitled note"}
+          label={displayTitle(note)}
           description={`${note.personName}’s note · ${formatRelative(note.occurredAt, now)}`}
           href={`/people/${note.personId}/notes/${note.id}`}
         />

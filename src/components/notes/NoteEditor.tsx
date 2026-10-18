@@ -10,6 +10,7 @@ import { useCoarsePointer } from "@/lib/media";
 import type { NoteDoc } from "@/lib/notes/cache";
 import { emptyNoteDoc, spaceParagraphs } from "@/lib/notes/doc";
 import { noteExtensions, type NoteEditorHooks } from "@/lib/notes/extensions";
+import { noteText } from "@/lib/notes/text";
 import { titleFromDoc } from "@/lib/notes/title";
 import type { NoteContent } from "@/lib/notes/useNoteAutosave";
 import { cn } from "@/lib/utils";
@@ -48,7 +49,8 @@ const imagesDroppedToast = (n: number) =>
 
 export function readContent(editor: Editor): NoteContent {
   const json = editor.getJSON();
-  return { json, md: editor.getMarkdown(), text: editor.getText({ blockSeparator: "\n" }), title: titleFromDoc(json) };
+  // noteText, not editor.getText(): one line per textblock, no blank lines from list wrappers.
+  return { json, md: editor.getMarkdown(), text: noteText(json), title: titleFromDoc(json) };
 }
 
 /**

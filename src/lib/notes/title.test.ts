@@ -66,6 +66,22 @@ describe("display helpers", () => {
     expect(noteSnippet({ title: "Just a title", excerpt: "Just a title" })).toBe("");
   });
 
+  it("snippet is the first meaningful line after the title", () => {
+    // Old contentText (Tiptap getText) had blank lines from list wrappers.
+    expect(noteSnippet({ title: "Lisbon", excerpt: "Lisbon\n\n\nsend him the flat link\nDinner plans" })).toBe("send him the flat link");
+    // Markdown-ish plain text (quick composer, imports): markers never repeat the title or show up.
+    expect(noteSnippet({ title: "Lunch with Tom", contentText: "# Lunch with Tom\n\n- [ ] book the table" })).toBe("book the table");
+    expect(noteSnippet({ title: "Trip", excerpt: "Trip\n---\n•\n☐ pack" })).toBe("pack");
+    // A separate title (imports): the text's first line is the snippet.
+    expect(noteSnippet({ title: "Coffee with Ana", excerpt: "Talked about Berlin\nKids" })).toBe("Talked about Berlin");
+    // A capped title ("…") still matches the full first line.
+    expect(noteSnippet({ title: "A very long first line…", excerpt: "A very long first line that keeps going\nNext" })).toBe("Next");
+  });
+
+  it("display title strips markdown markers from a text-only note", () => {
+    expect(displayTitle({ title: null, excerpt: "\n## Dinner plans\nok" })).toBe("Dinner plans");
+  });
+
   it("detects blank content", () => {
     expect(isBlankContent({ title: null, contentText: " \n " })).toBe(true);
     expect(isBlankContent({ title: "T", contentText: "" })).toBe(false);

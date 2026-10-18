@@ -5,17 +5,12 @@ import { ListSkeleton } from "@/components/skeletons/parts";
 import { NAV_FORWARD, TAB } from "@/components/shell/transitions";
 import { RelativeTime } from "@/components/ui/RelativeTime";
 import type { NoteKind } from "@/lib/constants";
+import { displayTitle } from "@/lib/notes/title";
 import { useQueryReady } from "@/lib/offline/useCacheReady";
 import { useRecentNotes } from "@/lib/queries/notes";
 import { Section } from "./Section";
 
 const KIND_ICON: Record<NoteKind, LucideIcon> = { note: FileText, meeting: Users, call: Phone, message: MessageSquare };
-
-function noteTitle(n: { title: string | null; excerpt?: string | null }) {
-  if (n.title?.trim()) return n.title.trim();
-  const first = n.excerpt?.split("\n").find((l) => l.trim());
-  return first?.trim() || "Untitled note";
-}
 
 /** Most recently edited notes, newest first. */
 export function RecentNotes({ className }: { className?: string }) {
@@ -55,7 +50,7 @@ export function RecentNotes({ className }: { className?: string }) {
                     <Icon size={16} strokeWidth={2.1} />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-body text-fg">{noteTitle(n)}</span>
+                    <span className="block truncate text-body text-fg">{displayTitle(n)}</span>
                     <span className="block truncate text-footnote text-fg-3">
                       {n.person.displayName} · <RelativeTime date={n.updatedAt} />
                     </span>
