@@ -1,10 +1,12 @@
 "use client";
-import { defaultShouldDehydrateQuery, QueryClient, type Query } from "@tanstack/react-query";
+import { defaultShouldDehydrateQuery, QueryClient, type Mutation, type Query } from "@tanstack/react-query";
 import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persister";
-import type { PersistQueryClientOptions } from "@tanstack/react-query-persist-client";
+import type { PersistedClient, Persister, PersistQueryClientOptions } from "@tanstack/react-query-persist-client";
 import { del, get, set } from "idb-keyval";
 
 // Bump when cached API shapes change incompatibly (v2: people index, note excerpts, activities).
+// Bumping drops the whole persisted cache — including writes still queued offline — so additive
+// fields (e.g. a note's `baseVersions`) don't bump it.
 export const CACHE_VERSION = "v2";
 
 /** How long a persisted cache stays usable offline. */
@@ -33,13 +35,54 @@ export function makeQueryClient() {
 }
 
 /**
- * Which queries reach IndexedDB: every successful query unless it opts out with
- * `meta: { persist: false }` (large, volatile or sensitive data — chat transcripts, search
- * results, geocoder lookups…). Paused mutations are always persisted (TanStack default) so
- * offline writes survive a reload.
+ * Key roots that never reach IndexedDB, whatever a query's meta says: chat transcripts, the
+ * security overview, connected apps (token list) and geocoder lookups. Search results
+ * (`[root, "search", …]`) are volatile and never persisted either.
  */
-export function shouldPersistQuery(query: Query): boolean {
-  return query.meta?.persist !== false && defaultShouldDehydrateQuery(query);
+const NEVER_PERSIST = new Set(["chat", "security", "connected-apps", "cities"]);
+
+/**
+ * Which queries reach IndexedDB: every successful query unless its key is excluded above or it
+ * opts out with `meta: { persist: false }` (large, volatile or sensitive data).
+ */
+export function shouldPersistQuery(query: Pick<Query, "queryKey" | "meta" | "state">): boolean {
+  const [root, sub] = query.queryKey;
+  if (NEVER_PERSIST.has(String(root)) || sub === "search") return false;
+  return query.meta?.persist !== false && defaultShouldDehydrateQuery(query as Query);
+}
+
+/**
+ * Writes that can be sent again when their outcome is unknown (idempotent: client ids, PUTs,
+ * PATCHes, deletes). Completing a follow-up is not — a repeat would skip a recurrence.
+ */
+export function isReplayableWrite(mutationKey: readonly unknown[] | undefined, variables: unknown): boolean {
+  const [root, op] = mutationKey ?? [];
+  switch (root) {
+    case "notes":
+    case "people":
+    case "activities":
+    case "settings":
+    case "chat":
+      return true;
+    case "reminders":
+      return op !== "action" || (variables as { action?: unknown } | undefined)?.action !== "done";
+    default:
+      return false;
+  }
+}
+
+/**
+ * Paused (offline) writes are persisted so they survive a reload — and so are replayable writes
+ * still in flight, which a closing tab would otherwise lose (see `resumeInFlight`).
+ */
+export function shouldPersistMutation(m: Pick<Mutation, "state" | "options">): boolean {
+  return m.state.isPaused || (m.state.status === "pending" && isReplayableWrite(m.options.mutationKey, m.state.variables));
+}
+
+/** Restored writes that were in flight when the page went away resume like paused ones. */
+export function resumeInFlight(client: PersistedClient): PersistedClient {
+  const mutations = client.clientState.mutations.map((m) => (m.state.status === "pending" && !m.state.isPaused ? { ...m, state: { ...m.state, isPaused: true } } : m));
+  return { ...client, clientState: { ...client.clientState, mutations } };
 }
 
 /**
@@ -55,22 +98,46 @@ function afterHydration(): Promise<void> {
   });
 }
 
-export function makePersister() {
+let flushActive: (() => Promise<void>) | null = null;
+
+/**
+ * Writes the newest cache snapshot to IndexedDB right away, skipping the throttle — call on
+ * pagehide / tab hidden so a just-queued save (and its `syncPending` flag) is on disk before the
+ * page may be killed. No-op until the persisted cache has been restored.
+ */
+export function flushPersistedCache(): Promise<void> {
+  return flushActive?.() ?? Promise.resolve();
+}
+
+export function makePersister(): Persister & { flush: () => Promise<void> } {
+  const key = `the-network-cache-${CACHE_VERSION}`;
   const persister = createAsyncStoragePersister({
     storage: {
-      getItem: (key) => get(key),
-      setItem: (key, value) => set(key, value),
-      removeItem: (key) => del(key),
+      getItem: (k) => get(k),
+      setItem: (k, value) => set(k, value),
+      removeItem: (k) => del(k),
     },
-    key: `the-network-cache-${CACHE_VERSION}`,
+    key,
     throttleTime: PERSIST_THROTTLE_MS,
   });
+  // The subscriber hands every snapshot to persistClient synchronously; the throttle may sit on it.
+  let latest: PersistedClient | null = null;
+  const flush = async () => {
+    if (latest) await set(key, JSON.stringify(latest));
+  };
+  flushActive = flush;
   return {
-    ...persister,
+    persistClient: (client) => {
+      latest = client;
+      return persister.persistClient(client);
+    },
     restoreClient: async () => {
       await afterHydration();
-      return persister.restoreClient();
+      const client = await persister.restoreClient();
+      return client ? resumeInFlight(client) : client;
     },
+    removeClient: () => persister.removeClient(),
+    flush,
   };
 }
 
@@ -80,6 +147,6 @@ export function makePersistOptions(): Omit<PersistQueryClientOptions, "queryClie
     persister: makePersister(),
     buster: CACHE_VERSION,
     maxAge: PERSIST_MAX_AGE,
-    dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery },
+    dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery, shouldDehydrateMutation: shouldPersistMutation },
   };
 }

@@ -22,16 +22,30 @@ import "./editor.css";
 
 export type { NoteContent } from "@/lib/notes/useNoteAutosave";
 
+type EditorNote = Pick<NoteDoc, "contentJson" | "contentMd"> & Partial<Pick<NoteDoc, "contentText" | "localOnly" | "baseVersions">>;
+
 export type NoteEditorApi = {
   editor: Editor;
   /** Current content (JSON, Markdown, plain text, derived title). */
   read: () => NoteContent;
   focus: () => void;
+  /** Replaces the whole document (a fresher server copy) without an update event or undo step. */
+  replace: (note: Pick<NoteDoc, "contentJson" | "contentMd">) => void;
+  isDestroyed: () => boolean;
+  /** The note the editor was created from (its version is what the first save is based on). */
+  source: EditorNote;
 };
+
+/** Editor content for a note: `contentJson`, else `contentMd` (Markdown), else an empty Title line. */
+function initialContent(note: Pick<NoteDoc, "contentJson" | "contentMd">) {
+  if (note.contentJson) return { content: note.contentJson as Record<string, unknown>, type: "json" as const };
+  if (note.contentMd?.trim()) return { content: note.contentMd, type: "markdown" as const };
+  return { content: emptyNoteDoc() as Record<string, unknown>, type: "json" as const };
+}
 
 export type NoteEditorProps = {
   /** Initial content: `contentJson`, else `contentMd` (Markdown), else an empty Title line. */
-  note: Pick<NoteDoc, "contentJson" | "contentMd">;
+  note: EditorNote;
   /** Put the caret in the note right away (new notes). */
   autoFocus?: boolean;
   /** Called once with the editor and its initial content in place. */
@@ -53,6 +67,13 @@ export function readContent(editor: Editor): NoteContent {
   return { json, md: editor.getMarkdown(), text: noteText(json), title: titleFromDoc(json) };
 }
 
+/** Swaps in another version of the note — not an edit: no update event, no undo step. */
+function replaceContent(editor: Editor, note: Pick<NoteDoc, "contentJson" | "contentMd">) {
+  const next = initialContent(note);
+  editor.chain().setMeta("addToHistory", false).setContent(next.content, { emitUpdate: false, contentType: next.type }).run();
+  if (next.type === "markdown") editor.chain().setMeta("addToHistory", false).setContent(spaceParagraphs(editor.getJSON()), { emitUpdate: false }).run();
+}
+
 /**
  * The Apple Notes–style editor: Title/Heading/Subheading/Body, checklists, lists, quotes, links,
  * clean paste. Phone: toolbar docked above the keyboard. Desktop: toolbar in the nav bar plus a
@@ -66,12 +87,9 @@ export function NoteEditor({ note, autoFocus, onReady, onChange, toolbarSlot, ed
     callbacks.current = { onReady, onChange };
   });
 
-  // Initial content is read once; the editor owns the document afterwards.
-  const [initial] = useState(() => {
-    if (note.contentJson) return { content: note.contentJson as Record<string, unknown>, type: "json" as const };
-    if (note.contentMd?.trim()) return { content: note.contentMd, type: "markdown" as const };
-    return { content: emptyNoteDoc() as Record<string, unknown>, type: "json" as const };
-  });
+  // Initial content is read once; the editor owns the document afterwards (see `replace`).
+  const [source] = useState(note);
+  const [initial] = useState(() => initialContent(note));
   const [extensions] = useState(() => {
     const hooks: NoteEditorHooks = { onLink: () => setLinkOpen(true), onImagesDropped: imagesDroppedToast };
     return noteExtensions(() => hooks);
@@ -102,7 +120,14 @@ export function NoteEditor({ note, autoFocus, onReady, onChange, toolbarSlot, ed
         editor.chain().setMeta("addToHistory", false).setContent(spaced, { emitUpdate: false }).run();
         if (autoFocus) editor.commands.focus("end");
       }
-      callbacks.current.onReady?.({ editor, read: () => readContent(editor), focus: () => editor.commands.focus() });
+      callbacks.current.onReady?.({
+        editor,
+        read: () => readContent(editor),
+        focus: () => editor.commands.focus(),
+        replace: (next) => replaceContent(editor, next),
+        isDestroyed: () => editor.isDestroyed,
+        source,
+      });
     },
     onUpdate: () => callbacks.current.onChange?.(),
     onFocus: () => isKeyboardPrimed() && releaseKeyboardPrime(),

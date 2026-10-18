@@ -9,7 +9,12 @@
  *
  * Writes go through mutation defaults (so paused/offline writes resume after a reload) and run
  * in a per-note scope (`note:<id>`), so create → updates → delete always reach the server in
- * order. Each write patches the caches optimistically (see lib/notes/cache).
+ * order; a note for a person still being created offline queues behind that person (see
+ * ./write-order). Each write patches the caches optimistically (see lib/notes/cache).
+ *
+ * Content saves are conditional (`baseVersions`, see lib/notes/version): when the note changed
+ * on another device meanwhile the server refuses with 409 and we keep both versions — the note
+ * takes the other device's text and the local words become a new note beside it.
  */
 import { MutationObserver, onlineManager, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
@@ -30,10 +35,13 @@ import {
   type DraftInput,
   type NoteDoc,
 } from "@/lib/notes/cache";
+import { isBlankNote } from "@/lib/notes/write-rules";
+import { contentVersion, extendChain } from "@/lib/notes/version";
 import type { NoteInput, NotePatch, NoteUpsert } from "@/lib/schemas";
 import { withContentText } from "./compat";
 import { keys } from "./keys";
 import type { NoteDetail, NoteSearchHit, NoteSummary, RecentNoteApi } from "./types";
+import { ParentPendingError, personEntity, scopeFor, waitForParent } from "./write-order";
 
 export type { NoteDoc } from "@/lib/notes/cache";
 
@@ -56,6 +64,8 @@ export type UpsertVars = {
   fromPersonId?: string | null;
   /** An autosave of the content: a newer one may replace it while it waits in the queue. */
   content?: boolean;
+  /** Sent as the page goes away: the request may outlive it (fetch keepalive). */
+  keepalive?: boolean;
 };
 export type DeleteVars = { id: string; personId: string; persisted?: boolean };
 export type RestoreVars = { id: string; personId: string; summary?: NoteSummary };
@@ -114,6 +124,8 @@ export function useNoteSearch(query: string, opts: { personId?: string; limit?: 
     },
     enabled: q.length >= 2,
     placeholderData: (prev) => prev,
+    gcTime: 60_000,
+    meta: { persist: false },
   });
 }
 
@@ -121,14 +133,58 @@ export function useNoteSearch(query: string, opts: { personId?: string; limit?: 
 /*  Mutation defaults                                                  */
 /* ------------------------------------------------------------------ */
 
-/** 4xx never retries; 5xx a few times; network errors keep trying (and pause while offline). */
+/**
+ * 4xx never retries — except a 404 while the note's person is still queued (it lands first);
+ * 5xx a few times; network errors keep trying (and pause while offline).
+ */
 function retry(failureCount: number, error: unknown) {
+  if (error instanceof ParentPendingError) return true;
   if (error instanceof ApiError) return error.status >= 500 && failureCount < 3;
   return true;
 }
 const retryDelay = (attempt: number) => Math.min(1000 * 2 ** attempt, 30_000);
 
-const CONTENT_KEYS = ["title", "contentJson", "contentMd", "contentText", "kind", "occurredAt", "pinned", "personId"] as const;
+const CONTENT_KEYS = ["title", "contentJson", "contentMd", "contentText", "kind", "occurredAt", "pinned", "personId", "baseVersions"] as const;
+
+const hasContent = (b: NoteUpsert) => b.contentText !== undefined || b.contentMd !== undefined;
+
+/** The 409 body of a refused content save: the note as the server has it now. */
+function conflictNote(error: unknown): NoteDetail | null {
+  if (!(error instanceof ApiError) || error.status !== 409 || error.code !== "conflict") return null;
+  const note = (error.data as { note?: NoteDetail } | undefined)?.note;
+  return note?.id ? note : null;
+}
+
+/** Undoes an optimistic restore the server refused (e.g. 409: the imported note came back as a newer copy). */
+function revertRestore(qc: QueryClient, id: string, personId: string) {
+  qc.setQueryData<NoteDoc>(keys.note(id), (p) => (p ? { ...p, deleted: true, syncPending: false } : p));
+  removeNoteFromLists(qc, id, personId, { countDelta: -1 });
+}
+
+/**
+ * "Keep both" after a refused content save (409: the note changed on another device since this
+ * one opened it). The note takes the other device's version; the local words — the newest
+ * queued, which the cache holds — become a new note for the same person. An open note page
+ * follows `forkedTo` to the copy; otherwise a toast says what happened. Nothing is dropped.
+ */
+function keepBothVersions(qc: QueryClient, vars: UpsertVars, server: NoteDetail): string | null {
+  const local = qc.getQueryData<NoteDoc>(keys.note(vars.id));
+  dropQueuedAutosaves(qc, vars.id); // superseded: their words are what the cache holds
+  const words = local?.syncPending ? local : { ...local, ...vars.body };
+  const content = { title: words.title ?? null, contentJson: words.contentJson ?? null, contentMd: words.contentMd ?? "", contentText: words.contentText ?? "" };
+  const onScreen = (qc.getQueryCache().find({ queryKey: keys.note(vars.id), exact: true })?.getObserversCount() ?? 0) > 0;
+  const keep = !isBlankNote(content) && contentVersion(content) !== contentVersion(server);
+  const copyId = keep ? crypto.randomUUID() : null;
+  qc.setQueryData<NoteDoc>(keys.note(vars.id), { ...server, ...(copyId && onScreen ? { forkedTo: copyId } : {}) });
+  upsertNoteInLists(qc, toSummary(server));
+  if (!copyId) return null;
+  const personId = local?.personId ?? vars.body.personId ?? server.personId;
+  const meta = { kind: (local?.kind ?? server.kind) as NoteKind, occurredAt: new Date(local?.occurredAt ?? server.occurredAt).toISOString() };
+  startNoteDraft(qc, { id: copyId, personId, ...meta, ...content, contentJson: content.contentJson as DraftInput["contentJson"] });
+  saveNote(qc, copyId, { personId, ...content, ...meta, pinned: false }, { isNew: true, sync: true });
+  if (!onScreen) toast({ id: `note-fork-${vars.id}`, title: "Note edited on two devices", description: "Both versions were kept as separate notes.", duration: 8000 });
+  return copyId;
+}
 
 function applyUpsert(qc: QueryClient, { id, body, isNew, fromPersonId }: UpsertVars) {
   const prev = qc.getQueryData<NoteDoc>(keys.note(id));
@@ -159,6 +215,8 @@ function applyUpsert(qc: QueryClient, { id, body, isNew, fromPersonId }: UpsertV
   if (body.pinned !== undefined) next.pinned = body.pinned;
   if (body.personId) next.personId = body.personId;
   if (body.restore) next.deleted = false;
+  // Content on its way: remember which server versions it may replace, for a resend (reconcile).
+  if (hasContent(body)) next.baseVersions = extendChain(body.baseVersions ?? [], contentVersion(next));
   next.syncPending = true;
   qc.setQueryData(keys.note(id), next);
   if (next.deleted) return;
@@ -187,6 +245,8 @@ export function reconcileNotes(qc: QueryClient) {
         kind: doc.kind as NoteKind,
         occurredAt: new Date(doc.occurredAt).toISOString(),
         pinned: doc.pinned,
+        // Still conditional: a lost save must not overwrite what another device wrote since.
+        ...(doc.baseVersions?.length && !doc.localOnly ? { baseVersions: doc.baseVersions } : {}),
       },
       { isNew: !!doc.localOnly, sync: true },
     );
@@ -227,11 +287,21 @@ export function registerNoteMutations(qc: QueryClient) {
   });
 
   qc.setMutationDefaults(NOTE_MUT.upsert, {
-    mutationFn: ({ id, body }: UpsertVars) => api.put<NoteDetail>(`/api/notes/${id}`, body),
+    mutationFn: ({ id, body, keepalive }: UpsertVars) =>
+      api.put<NoteDetail>(`/api/notes/${id}`, body, { keepalive }).catch((e: unknown) => {
+        throw waitForParent(qc, e, personEntity(body.personId));
+      }),
     retry,
     retryDelay,
     onMutate: (vars: UpsertVars) => applyUpsert(qc, vars),
     onSuccess: (data: NoteDetail, vars: UpsertVars) => {
+      if (data.deletedAt) {
+        // The write left it without words, so the server deleted it (as clearing does here).
+        qc.setQueryData<NoteDoc>(keys.note(data.id), { ...data, deleted: true });
+        removeNoteFromLists(qc, data.id, data.personId);
+        scheduleNotesSync(qc, [data.personId]);
+        return;
+      }
       // Newer writes for this note are queued: keep their optimistic content, take server metadata.
       const newer = pendingNoteWrites(qc, vars.id, vars).length > 0;
       qc.setQueryData<NoteDoc>(keys.note(data.id), (prev) => {
@@ -244,14 +314,21 @@ export function registerNoteMutations(qc: QueryClient) {
       if (vars.sync) scheduleNotesSync(qc, [data.personId, vars.fromPersonId]);
     },
     onError: (error: Error, vars: UpsertVars) => {
+      const server = conflictNote(error);
+      if (server) {
+        keepBothVersions(qc, vars, server);
+        scheduleNotesSync(qc, [server.personId, vars.body.personId]);
+        return;
+      }
       // The server refused it: resending won't help.
       qc.setQueryData<NoteDoc>(keys.note(vars.id), (p) => (p ? { ...p, syncPending: false } : p));
       if (error instanceof ApiError && error.status === 410) {
         qc.setQueryData<NoteDoc>(keys.note(vars.id), (p) => (p ? { ...p, deleted: true } : p));
         return;
       }
+      if (vars.body.restore && vars.body.personId) revertRestore(qc, vars.id, vars.body.personId);
       const description = error instanceof ApiError && error.status === 404 ? "This person no longer exists." : error.message;
-      toast.error("Couldn’t save note", { id: `note-save-${vars.id}`, description });
+      toast.error(vars.body.restore ? "Couldn’t restore note" : "Couldn’t save note", { id: `note-save-${vars.id}`, description });
       scheduleNotesSync(qc, [vars.body.personId, vars.fromPersonId]);
     },
   });
@@ -294,7 +371,10 @@ export function registerNoteMutations(qc: QueryClient) {
       if (summary) upsertNoteInLists(qc, summary, { isNew: true });
     },
     onSuccess: (data: NoteDetail) => onSaved(data),
-    onError: (error: Error) => toast.error("Couldn’t restore note", { description: error.message }),
+    onError: (error: Error, v: string | RestoreVars) => {
+      if (typeof v !== "string") revertRestore(qc, v.id, v.personId);
+      toast.error("Couldn’t restore note", { description: error.message });
+    },
   });
 }
 
@@ -302,9 +382,13 @@ export function registerNoteMutations(qc: QueryClient) {
 /*  Imperative writes (usable outside React render, e.g. on pagehide)  */
 /* ------------------------------------------------------------------ */
 
-/** Runs a note mutation in the note's scope. Never throws (errors are handled by the defaults). */
-function runNoteMutation<TVars>(qc: QueryClient, mutationKey: readonly unknown[], id: string, vars: TVars) {
-  const observer = new MutationObserver<unknown, Error, TVars>(qc, { mutationKey, scope: { id: noteScopeId(id) } });
+/**
+ * Runs a note mutation in the note's scope — or behind its person while that person's create is
+ * still queued (see ./write-order). Never throws (errors are handled by the defaults).
+ */
+function runNoteMutation<TVars>(qc: QueryClient, mutationKey: readonly unknown[], id: string, personId: string | null | undefined, vars: TVars) {
+  const scope = scopeFor(qc, noteScopeId(id), [personEntity(personId)]);
+  const observer = new MutationObserver<unknown, Error, TVars>(qc, { mutationKey, scope: { id: scope } });
   return observer
     .mutate(vars)
     .catch(() => undefined)
@@ -323,7 +407,7 @@ function dropQueuedAutosaves(qc: QueryClient, id: string) {
 /** Idempotent create-or-update of a note (PUT). Works offline; serialized per note. */
 export function saveNote(qc: QueryClient, id: string, body: NoteUpsert, opts: Omit<UpsertVars, "id" | "body"> = {}) {
   if (opts.content) dropQueuedAutosaves(qc, id);
-  return runNoteMutation<UpsertVars>(qc, NOTE_MUT.upsert, id, { id, body, ...opts });
+  return runNoteMutation<UpsertVars>(qc, NOTE_MUT.upsert, id, body.personId, { id, body, ...opts });
 }
 
 /**
@@ -343,18 +427,21 @@ export function deleteNote(
     return;
   }
   const summary = note.summary ?? (doc ? toSummary(doc) : undefined);
-  runNoteMutation<DeleteVars>(qc, NOTE_MUT.delete, note.id, { id: note.id, personId: note.personId });
+  runNoteMutation<DeleteVars>(qc, NOTE_MUT.delete, note.id, note.personId, { id: note.id, personId: note.personId });
   if (opts.undo === false) return;
   toast.undo(opts.message ?? "Note deleted", () => {
-    runNoteMutation<RestoreVars>(qc, NOTE_MUT.restore, note.id, { id: note.id, personId: note.personId, summary });
+    runNoteMutation<RestoreVars>(qc, NOTE_MUT.restore, note.id, note.personId, { id: note.id, personId: note.personId, summary });
     opts.onUndo?.();
   });
 }
 
-/** Brings a deleted note back (with its current content when `body` is given). */
+/**
+ * Brings a deleted note back — with `body` as its content when that has words; blank content is
+ * never restored (the server keeps the note's last words, which come back instead).
+ */
 export function restoreNote(qc: QueryClient, id: string, personId: string, body?: NoteUpsert) {
-  if (body) return saveNote(qc, id, { ...body, personId, restore: true }, { sync: true });
-  return runNoteMutation<RestoreVars>(qc, NOTE_MUT.restore, id, { id, personId });
+  if (body && !isBlankNote(body)) return saveNote(qc, id, { ...body, personId, restore: true }, { sync: true });
+  return runNoteMutation<RestoreVars>(qc, NOTE_MUT.restore, id, personId, { id, personId });
 }
 
 /* ------------------------------------------------------------------ */

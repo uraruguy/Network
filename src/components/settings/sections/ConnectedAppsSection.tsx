@@ -32,8 +32,16 @@ const KEY = ["connected-apps"] as const;
 const accessLabel = (scopes: Scope[]) => (scopes.includes("network:write") ? "Read & write" : "Read only");
 
 function useConnectedApps() {
-  return useQuery({ queryKey: KEY, queryFn: () => api.get<ConnectedApps>("/api/tokens"), staleTime: 30_000 });
+  return useQuery({ queryKey: KEY, queryFn: () => api.get<ConnectedApps>("/api/tokens"), staleTime: 30_000, meta: { persist: false } });
 }
+
+/**
+ * Security actions run now or fail loudly — never queued for later (a revoke that silently waits
+ * for a connection would leave access open). No retries, no offline pause.
+ */
+const ONLINE_ONLY = { networkMode: "always", retry: 0 } as const;
+
+const failure = (e: Error) => (e instanceof TypeError ? "You’re offline. Connect to the internet and try again." : e.message);
 
 async function copy(text: string, what = "Copied") {
   try {
@@ -60,15 +68,17 @@ export function ConnectedAppsSection() {
   const [creating, setCreating] = useState(false);
 
   const revokeToken = useMutation({
+    ...ONLINE_ONLY,
     mutationFn: (id: string) => api.delete(`/api/tokens/${id}`),
     onSuccess: () => toast.success("Token revoked"),
-    onError: (e: Error) => toast.error("Couldn't revoke the token", { description: e.message }),
+    onError: (e: Error) => toast.error("Couldn't revoke the token", { description: failure(e) }),
     onSettled: () => qc.invalidateQueries({ queryKey: KEY }),
   });
   const revokeGrant = useMutation({
+    ...ONLINE_ONLY,
     mutationFn: (clientId: string) => api.delete(`/api/tokens/grants?client=${encodeURIComponent(clientId)}`),
     onSuccess: () => toast.success("App disconnected"),
-    onError: (e: Error) => toast.error("Couldn't disconnect the app", { description: e.message }),
+    onError: (e: Error) => toast.error("Couldn't disconnect the app", { description: failure(e) }),
     onSettled: () => qc.invalidateQueries({ queryKey: KEY }),
   });
 
@@ -290,12 +300,13 @@ function CreateTokenDialog({ open, onOpenChange, mcpUrl, onCreated }: { open: bo
   const [nameError, setNameError] = useState<string | null>(null);
 
   const create = useMutation({
+    ...ONLINE_ONLY,
     mutationFn: () => api.post<{ token: string; item: TokenItem; mcpUrl: string }>("/api/tokens", { name: name.trim(), access }),
     onSuccess: (res) => {
       setCreated({ token: res.token, name: res.item.name, mcpUrl: res.mcpUrl || mcpUrl });
       onCreated();
     },
-    onError: (e: Error) => toast.error("Couldn't create the token", { description: e.message }),
+    onError: (e: Error) => toast.error("Couldn't create the token", { description: failure(e) }),
   });
 
   const reset = () => {

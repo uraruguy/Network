@@ -10,6 +10,7 @@ import type { ReminderAction, ReminderInput } from "@/lib/schemas";
 import { keys } from "./keys";
 import { applyChange, earliestDue, findIn, type ListFilter, type ReminderChange, type ReminderLike, type ReminderPatch } from "./reminders-cache";
 import type { PersonDetailApi, PersonIndexRow } from "./types";
+import { noteEntity, ParentPendingError, personEntity, reminderEntity, scopeFor, waitForParent } from "./write-order";
 
 export type { ReminderWithPerson };
 /** An open reminder as embedded in a person's detail (no `person`). */
@@ -148,7 +149,12 @@ function changeForAction(qc: QueryClient, v: ReminderActionVars): ReminderChange
  */
 export function registerReminderMutations(qc: QueryClient) {
   qc.setMutationDefaults<ReminderWithPerson, Error, CreateReminderVars>(REMINDER_MUT.create, {
-    mutationFn: (input: CreateReminderVars) => api.post<ReminderWithPerson>("/api/reminders", input),
+    mutationFn: (input: CreateReminderVars) =>
+      api.post<ReminderWithPerson>("/api/reminders", input).catch((e: unknown) => {
+        throw waitForParent(qc, e, personEntity(input.personId));
+      }),
+    // A 404 while the person's create is still queued waits for it; anything else a few times.
+    retry: (count: number, e: Error) => e instanceof ParentPendingError || count < 3,
     onMutate: async (v: CreateReminderVars) => {
       const now = new Date().toISOString();
       applyReminderChange(qc, v.personId, {
@@ -203,9 +209,15 @@ export function registerReminderMutations(qc: QueryClient) {
   });
 }
 
-/** Runs a mutation through its registered defaults, serialized with other writes to the same reminder. */
+/**
+ * Runs a mutation through its registered defaults, serialized with other writes to the same
+ * reminder — and behind its note's first save or its person's create while those are queued
+ * (see ./write-order), so the server links the note and knows the person.
+ */
 function run<TData, TVars>(qc: QueryClient, mutationKey: readonly unknown[], variables: TVars, reminderId: string): Promise<TData> {
-  const mutation = qc.getMutationCache().build<TData, Error, TVars, unknown>(qc, { mutationKey, scope: { id: `reminder:${reminderId}` } });
+  const v = variables as { personId?: string; noteId?: string | null };
+  const scope = scopeFor(qc, reminderEntity(reminderId), [noteEntity(v.noteId), personEntity(v.personId)]);
+  const mutation = qc.getMutationCache().build<TData, Error, TVars, unknown>(qc, { mutationKey, scope: { id: scope } });
   return mutation.execute(variables);
 }
 

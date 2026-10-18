@@ -9,6 +9,7 @@ import type { InfiniteData, QueryClient } from "@tanstack/react-query";
 import type { JSONContent } from "@tiptap/react";
 import type { NoteKind } from "@/lib/constants";
 import { keys } from "@/lib/queries/keys";
+import { writeEntity } from "@/lib/queries/write-order";
 import type { NoteDetail, NoteSummary, NotesPage, PersonDetailApi, RecentNoteApi } from "@/lib/queries/types";
 import { emptyNoteDoc } from "./doc";
 
@@ -26,9 +27,25 @@ export type NoteDoc = NoteDetail & {
    * with a closed tab). The cache is persisted, so `reconcileNotes` can resend it.
    */
   syncPending?: boolean;
+  /**
+   * Server content versions the cached content may replace (see lib/notes/version) — kept while
+   * local content is on its way, so a resend after a lost write is still conditional. Absent:
+   * the cached content is the server's own.
+   */
+  baseVersions?: string[];
+  /**
+   * A content save was refused because the note changed on another device: the cache now holds
+   * that version, and the local words were kept as this new note. Set only while the note is on
+   * screen, for the page to follow; cleared once handled.
+   */
+  forkedTo?: string;
 };
 
-/** Mutation scope: all writes to one note run in order (create → updates → delete). */
+/**
+ * A note's own mutation scope: all writes to one note run in order (create → updates → delete).
+ * A note for a person still being created offline runs in that person's scope instead (see
+ * lib/queries/write-order).
+ */
 export const noteScopeId = (id: string) => `note:${id}`;
 
 const iso = (d: Date | string | number) => new Date(d).toISOString() as unknown as Date;
@@ -170,13 +187,16 @@ export function removeNoteFromLists(qc: QueryClient, id: string, personId: strin
 
 const isNoteWrite = (m: { options: { mutationKey?: readonly unknown[] } }) => m.options.mutationKey?.[0] === "notes";
 
+/** True for a write to this note, whichever scope it runs in. */
+export const isWriteForNote = (m: { options: { mutationKey?: readonly unknown[] }; state: { variables?: unknown } }, id: string) =>
+  writeEntity(m.options.mutationKey, m.state.variables) === noteScopeId(id);
+
 /** Writes for this note that haven't settled (queued, paused offline or in flight). */
 export function pendingNoteWrites(qc: QueryClient, id: string, except?: unknown) {
-  const scope = noteScopeId(id);
   return qc
     .getMutationCache()
     .getAll()
-    .filter((m) => m.options.scope?.id === scope && m.state.status === "pending" && (except === undefined || m.state.variables !== except));
+    .filter((m) => m.state.status === "pending" && isWriteForNote(m, id) && (except === undefined || m.state.variables !== except));
 }
 
 const syncPeople = new Set<string>();

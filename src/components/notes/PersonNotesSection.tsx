@@ -38,16 +38,18 @@ export function PersonNotesSection({ personId, personName, className }: PersonNo
     newNote(personId);
   };
 
-  // ⌘N: new note for this person.
+  // ⌘N: new note for this person. Capture phase, so this runs before the shell's ⌘N (New
+  // person), which skips handled events — one shortcut, one action.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.repeat) return;
       if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "n") {
         e.preventDefault();
         newNote(personId);
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [newNote, personId]);
 
   // The person page carries the newest 50 (pinned first); "Show all" pages through the rest.

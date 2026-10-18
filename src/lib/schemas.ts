@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CIRCLES, NOTE_KINDS, RECURRENCE, WARMTH } from "@/lib/constants";
+import { MAX_BASE_VERSIONS } from "@/lib/notes/version";
 
 /*
  * Request validation shared by the API and the client.
@@ -127,8 +128,13 @@ export type NotePatchData = z.output<typeof notePatch>;
 /**
  * Body of `PUT /api/notes/[id]` (idempotent create-or-update with a client-generated id).
  * `personId` is required when the note doesn't exist yet. `restore` revives a soft-deleted note.
+ * `baseVersions` (content versions, see lib/notes/version) makes a content save conditional: it
+ * is refused with 409 + the current note when the stored content changed underneath it.
  */
-export const noteUpsert = notePatch.extend({ restore: z.boolean().optional() });
+export const noteUpsert = notePatch.extend({
+  restore: z.boolean().optional(),
+  baseVersions: z.array(z.string().min(1).max(40)).max(MAX_BASE_VERSIONS).optional(),
+});
 export type NoteUpsert = z.input<typeof noteUpsert>;
 export type NoteUpsertData = z.output<typeof noteUpsert>;
 

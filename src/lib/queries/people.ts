@@ -10,7 +10,8 @@ import { keys } from "./keys";
 import { applyPersonPatch, indexRowFromDetail, seedPersonDetail, upsertIndexRow, type Lookups } from "./people-cache";
 import { registerReminderMutations } from "./reminders";
 import { registerTaxonomyMutations, useActivities } from "./taxonomy";
-import type { ActivityRow, Category, NotesPage, PeopleSearchPage, PersonDetailApi, PersonIndexRow, TagRow } from "./types";
+import type { ActivityRow, Category, NotesPage, PeopleSearchPage, PersonDetailApi, PersonIndexRow, RecentNoteApi, TagRow } from "./types";
+import { activityEntity, personEntity, scopeFor } from "./write-order";
 
 export type PeopleFilters = { q?: string; category?: string; warmth?: string; country?: string };
 
@@ -66,6 +67,8 @@ export function usePeopleSearch(params: Record<string, string | string[] | undef
     },
     getNextPageParam: (last) => last.nextCursor,
     enabled: opts.enabled ?? true,
+    gcTime: 60_000,
+    meta: { persist: false },
   });
 }
 
@@ -139,6 +142,21 @@ function removeFromIndex(qc: QueryClient, id: string) {
   qc.setQueryData<PersonIndexRow[]>(keys.peopleIndex(), (rows) => rows?.filter((r) => r.id !== id));
 }
 
+/** A removed person's follow-ups and notes leave Today (and every other list) at once. */
+function removePersonRows(qc: QueryClient, id: string) {
+  for (const [key, list] of qc.getQueriesData<{ personId: string }[]>({ queryKey: ["reminders"] })) {
+    if (list?.some((r) => r.personId === id)) qc.setQueryData(key, list.filter((r) => r.personId !== id));
+  }
+  qc.setQueryData<RecentNoteApi[]>(keys.recentNotes(), (list) => list?.filter((n) => n.personId !== id));
+}
+
+/** Lists that hold a person's follow-ups and notes (Today): refreshed after a removal or restore. */
+function invalidatePersonRows(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: ["reminders"] });
+  qc.invalidateQueries({ queryKey: ["notes"] });
+  qc.invalidateQueries({ queryKey: keys.stats() });
+}
+
 /** Server truth for everything a person write touches — skipped while other person writes are in flight. */
 function invalidatePeople(qc: QueryClient, id?: string) {
   if (qc.isMutating({ mutationKey: ["people"] }) > 1) return;
@@ -206,12 +224,18 @@ export function registerPeopleMutations(qc: QueryClient) {
   });
   qc.setMutationDefaults<unknown, Error, string>(MUT.deletePerson, {
     mutationFn: (id: string) => api.delete(`/api/people/${id}`),
-    onMutate: async (id: string) => removeFromIndex(qc, id),
+    onMutate: async (id: string) => {
+      removeFromIndex(qc, id);
+      removePersonRows(qc, id);
+    },
     onError: (e: unknown) => {
       toast.error("Couldn’t remove this person", { description: errorText(e) });
       qc.invalidateQueries({ queryKey: keys.peopleIndex() });
     },
-    onSettled: (_d: unknown, _e: unknown, id: string) => invalidatePeople(qc, id),
+    onSettled: (_d: unknown, _e: unknown, id: string) => {
+      invalidatePersonRows(qc);
+      invalidatePeople(qc, id);
+    },
   });
   qc.setMutationDefaults<PersonDetailApi, Error, string>(MUT.restorePerson, {
     mutationFn: (id: string) => api.post<PersonDetailApi>(`/api/people/${id}/restore`),
@@ -221,15 +245,30 @@ export function registerPeopleMutations(qc: QueryClient) {
     },
     onSuccess: (data: PersonDetailApi) => putPerson(qc, data),
     onError: (e: unknown) => toast.error("Couldn’t restore", { description: errorText(e) }),
-    onSettled: (_d: unknown, _e: unknown, id: string) => invalidatePeople(qc, id),
+    onSettled: (_d: unknown, _e: unknown, id: string) => {
+      invalidatePersonRows(qc);
+      invalidatePeople(qc, id);
+    },
   });
   registerTaxonomyMutations(qc);
   registerReminderMutations(qc);
 }
 
-/** Runs a person mutation through its defaults, serialized with other writes to the same person. */
+/** Entities a person write references that may still be queued: new activities, the introducer. */
+function personDeps(variables: unknown): string[] {
+  const v = variables as (Partial<PersonInput> & { patch?: PersonPatch }) | string | undefined;
+  if (!v || typeof v === "string") return [];
+  const fields = v.patch ?? v;
+  return [...(fields.activityIds ?? []).map(activityEntity), personEntity(fields.introducedById)].filter((e): e is string => !!e);
+}
+
+/**
+ * Runs a person mutation through its defaults, serialized with other writes to the same person —
+ * and behind a new activity or introducer it references whose create is still queued.
+ */
 function runPerson<TData, TVars>(qc: QueryClient, mutationKey: readonly unknown[], variables: TVars, personId: string): Promise<TData> {
-  const mutation = qc.getMutationCache().build<TData, Error, TVars, unknown>(qc, { mutationKey, scope: { id: `person:${personId}` } });
+  const scope = scopeFor(qc, `person:${personId}`, personDeps(variables));
+  const mutation = qc.getMutationCache().build<TData, Error, TVars, unknown>(qc, { mutationKey, scope: { id: scope } });
   return mutation.execute(variables);
 }
 
@@ -239,28 +278,30 @@ const ignore = () => {};
  * Fire-and-forget person writes: the cache (detail + index) updates instantly, requests run in
  * the background in per-person order (create → edits → delete), offline writes replay on reconnect.
  */
+export function personWrites(qc: QueryClient) {
+  return {
+    /** Creates a person and returns their (client-generated) id — navigate to it right away. */
+    create(input: PersonInput): string {
+      const id = input.id ?? crypto.randomUUID();
+      runPerson(qc, MUT.createPerson, { ...input, id }, id).catch(ignore);
+      return id;
+    },
+    update(id: string, patch: PersonPatch) {
+      runPerson(qc, MUT.updatePerson, { id, patch }, id).catch(ignore);
+    },
+    remove(id: string) {
+      runPerson(qc, MUT.deletePerson, id, id).catch(ignore);
+    },
+    restore(id: string): Promise<PersonDetailApi> {
+      return runPerson<PersonDetailApi, string>(qc, MUT.restorePerson, id, id);
+    },
+  };
+}
+
+/** `personWrites` for components. */
 export function usePersonWrites() {
   const qc = useQueryClient();
-  return useMemo(
-    () => ({
-      /** Creates a person and returns their (client-generated) id — navigate to it right away. */
-      create(input: PersonInput): string {
-        const id = input.id ?? crypto.randomUUID();
-        runPerson(qc, MUT.createPerson, { ...input, id }, id).catch(ignore);
-        return id;
-      },
-      update(id: string, patch: PersonPatch) {
-        runPerson(qc, MUT.updatePerson, { id, patch }, id).catch(ignore);
-      },
-      remove(id: string) {
-        runPerson(qc, MUT.deletePerson, id, id).catch(ignore);
-      },
-      restore(id: string): Promise<PersonDetailApi> {
-        return runPerson<PersonDetailApi, string>(qc, MUT.restorePerson, id, id);
-      },
-    }),
-    [qc],
-  );
+  return useMemo(() => personWrites(qc), [qc]);
 }
 
 /* ---------- v1-compatible hooks ---------- */
