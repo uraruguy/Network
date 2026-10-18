@@ -66,8 +66,23 @@
   to { background-position: -150% 0; }
 }
 
+/* Starter suggestions rise in, staggered by --i (the listItem motion preset, in CSS). CSS
+   keyframes play from the first paint of the server HTML: nothing waits on JS to become visible. */
+.chat-rise {
+  animation: chat-rise var(--spring-smooth-dur) var(--spring-smooth) both;
+  animation-delay: calc(var(--i, 0) * 20ms);
+}
+@keyframes chat-rise {
+  from { opacity: 0; transform: translateY(6px); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .chat-dots span,
   .chat-shimmer { animation: none; }
+  .chat-rise { animation-name: chat-fade; }
   .chat-shimmer { -webkit-text-fill-color: currentColor; background: none; }
+}
+
+@keyframes chat-fade {
+  from { opacity: 0; }
 }

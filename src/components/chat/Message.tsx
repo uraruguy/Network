@@ -66,7 +66,7 @@ export const Message = memo(function Message({ message, live, streaming }: { mes
     <div className={cn("group/msg flex flex-col items-start gap-2 pr-6 sm:pr-12", offscreenCheap)}>
       {segments.map((s) =>
         s.kind === "tools" ? (
-          <ToolPills key={s.key} calls={s.calls} />
+          <ToolPills key={s.key} calls={s.calls} animateIn={streaming} />
         ) : (
           <div key={s.key} className="surface max-w-full rounded-lg rounded-bl-xs px-4 py-3 text-body text-fg">
             <MemoMarkdown text={s.text} streaming={streaming} />

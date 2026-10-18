@@ -1,6 +1,6 @@
 "use client";
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useMemo, type KeyboardEvent } from "react";
+import { useCallback, useMemo } from "react";
 import { Combobox } from "@/components/ui/Combobox";
 import { api } from "@/lib/api";
 import { keys } from "@/lib/queries/keys";
@@ -28,18 +28,6 @@ const toItem = (location: LocationInput): Item => ({ key: location.cityId ? `cit
 export const cityLabel = (l: Pick<LocationInput, "name" | "country">) => `${l.name}, ${l.country}`;
 
 /**
- * Base UI's combobox clears its value on Escape when the popup is closed — in a sheet that means
- * "press Escape to dismiss" silently wipes the field. Swallow that Escape and just leave the
- * field (a second Escape then reaches the sheet). Use as `onKeyDownCapture` on a wrapper.
- */
-export function guardComboboxEscape(e: KeyboardEvent<HTMLElement>) {
-  const input = e.target as HTMLElement;
-  if (e.key !== "Escape" || input.getAttribute("role") !== "combobox" || input.getAttribute("aria-expanded") === "true") return;
-  e.stopPropagation();
-  input.blur();
-}
-
-/**
  * City search over the GeoNames dataset (`/api/geocode`), cached per query so repeat searches and
  * offline use are instant. Diacritic-insensitive on the server ("ljublj" → Ljubljana).
  */
@@ -58,33 +46,31 @@ export function CityPicker({ value, onChange, placeholder = "City", autoFocus, d
   );
 
   return (
-    <div className="contents" onKeyDownCapture={guardComboboxEscape}>
-      <Combobox<Item>
-        id={id}
-        value={selected}
-        onChange={(item) => onChange(item?.location ?? null)}
-        search={search}
-        debounceMs={140}
-        getKey={(i) => i.key}
-        getLabel={(i) => cityLabel(i.location)}
-        placeholder={placeholder}
-        emptyText="Search by city name"
-        autoFocus={autoFocus}
-        disabled={disabled}
-        invalid={aria["aria-invalid"]}
-        aria-label={aria["aria-label"] ?? placeholder}
-        renderItem={({ location: l }) => (
-          <span className="flex min-w-0 items-center gap-2.5">
-            <span aria-hidden className="w-6 shrink-0 text-center text-title3 leading-none">
-              {flag(l.countryCode)}
-            </span>
-            <span className="min-w-0">
-              <span className="block truncate font-medium">{l.name}</span>
-              <span className="block truncate text-footnote text-fg-3">{[l.admin && l.admin !== l.name ? l.admin : null, l.country].filter(Boolean).join(" · ")}</span>
-            </span>
+    <Combobox<Item>
+      id={id}
+      value={selected}
+      onChange={(item) => onChange(item?.location ?? null)}
+      search={search}
+      debounceMs={140}
+      getKey={(i) => i.key}
+      getLabel={(i) => cityLabel(i.location)}
+      placeholder={placeholder}
+      emptyText="Search by city name"
+      autoFocus={autoFocus}
+      disabled={disabled}
+      invalid={aria["aria-invalid"]}
+      aria-label={aria["aria-label"] ?? placeholder}
+      renderItem={({ location: l }) => (
+        <span className="flex min-w-0 items-center gap-2.5">
+          <span aria-hidden className="w-6 shrink-0 text-center text-title3 leading-none">
+            {flag(l.countryCode)}
           </span>
-        )}
-      />
-    </div>
+          <span className="min-w-0">
+            <span className="block truncate font-medium">{l.name}</span>
+            <span className="block truncate text-footnote text-fg-3">{[l.admin && l.admin !== l.name ? l.admin : null, l.country].filter(Boolean).join(" · ")}</span>
+          </span>
+        </span>
+      )}
+    />
   );
 }

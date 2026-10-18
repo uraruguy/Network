@@ -29,7 +29,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Avatar } from "@/components/glass/Avatar";
 import { Chip } from "@/components/glass/Chip";
 import { GlassButton } from "@/components/glass/GlassButton";
@@ -37,6 +37,7 @@ import { FollowUpSheet } from "@/components/followups/FollowUpSheet";
 import { QuickImportSheet } from "@/components/import/QuickImportSheet";
 import { PersonNotesSection } from "@/components/notes/PersonNotesSection";
 import { confirm } from "@/components/ui/confirm";
+import { AvatarTransition } from "@/components/shell/transitions";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { formatBirthday, parseBirthday } from "@/components/ui/date/BirthdayPicker";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -48,7 +49,9 @@ import { Skeleton, SkeletonRows } from "@/components/ui/Skeleton";
 import { toast } from "@/components/ui/Toast";
 import { useNow } from "@/lib/clock";
 import { formatDate, formatRelative, localTimeIn } from "@/lib/format";
+import { displayTitle } from "@/lib/notes/title";
 import { useCategories, usePersonProfile, usePersonWrites } from "@/lib/queries/people";
+import { useCacheReady } from "@/lib/offline/useCacheReady";
 import { isTempId } from "@/lib/queries/people-cache";
 import { useActivities } from "@/lib/queries/taxonomy";
 import type { IndexLocation, PersonDetailApi, PersonIndexRow } from "@/lib/queries/types";
@@ -127,13 +130,17 @@ export function PersonDetail({ id }: { id: string }) {
     if (deepLink) router.replace(`/people/${id}`, { scroll: false });
   }, [deepLink, id, router]);
 
-  const head: Head | undefined = person ?? preview;
+  // Cached data only once it may render (after hydration and the IndexedDB restore — see
+  // useCacheReady): the server never has it, so the first render must match its skeleton. On
+  // client navigations this is true immediately, so the hero (and the avatar morph) is there.
+  const cacheReady = useCacheReady();
+  const head: Head | undefined = cacheReady ? (person ?? preview) : undefined;
   const compact = useScrolledPast(nameRef, !!head);
 
   const back = () => (window.history.length > 1 ? router.back() : router.push("/people"));
 
   if (!head) {
-    if (notFound) {
+    if (cacheReady && notFound) {
       return (
         <div className="mx-auto max-w-2xl">
           <TopBar onBack={back} title="" compact={false} />
@@ -207,9 +214,12 @@ export function PersonDetail({ id }: { id: string }) {
 
       {/* Header */}
       <header className="flex flex-col items-center px-2 pt-2 pb-5 text-center">
-        <span className="rounded-full elevation-e2" style={{ viewTransitionName: `avatar-${id}` } as CSSProperties}>
-          <Avatar name={name} src={head.avatarUrl} size={104} />
-        </span>
+        {/* Rendered from the cached index row (see `head`), so the list avatar can morph into it. */}
+        <AvatarTransition personId={id}>
+          <span className="rounded-full elevation-e2">
+            <Avatar name={name} src={head.avatarUrl} size={104} />
+          </span>
+        </AvatarTransition>
         <h1 ref={nameRef} className="mt-3.5 max-w-full text-title1 text-balance text-fg">
           {name}
         </h1>
@@ -540,7 +550,7 @@ function Mentions({ person }: { person: PersonDetailApi }) {
         <ListRow
           key={note.id}
           icon={<FileText />}
-          label={note.title || note.excerpt?.split("\n")[0] || "Untitled note"}
+          label={displayTitle(note)}
           description={`${note.personName}’s note · ${formatRelative(note.occurredAt, now)}`}
           href={`/people/${note.personId}/notes/${note.id}`}
         />

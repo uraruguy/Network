@@ -6,6 +6,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { IconButton } from "@/components/ui/IconButton";
 import { SkeletonRows } from "@/components/ui/Skeleton";
 import { Tooltip } from "@/components/ui/Tooltip";
+import { useCacheReady } from "@/lib/offline/useCacheReady";
 import { useNewNote } from "@/lib/queries/notes";
 import { usePersonDetail, usePersonNotes } from "@/lib/queries/people";
 import type { NoteSummary } from "@/lib/queries/types";
@@ -22,7 +23,11 @@ const PAGE_SIZE = 50;
 
 export function PersonNotesSection({ personId, personName, className }: PersonNotesSectionProps) {
   const headingId = useId();
-  const { data: person, isPending } = usePersonDetail(personId);
+  // Cached data only once it may render (see useCacheReady): server HTML and hydration agree.
+  const cacheReady = useCacheReady();
+  const detail = usePersonDetail(personId);
+  const person = cacheReady ? detail.data : undefined;
+  const isPending = !cacheReady || detail.isPending;
   const [expanded, setExpanded] = useState(false);
   const all = usePersonNotes(expanded ? personId : null, { pageSize: PAGE_SIZE });
   const newNote = useNewNote();
@@ -48,10 +53,10 @@ export function PersonNotesSection({ personId, personName, className }: PersonNo
   // The person page carries the newest 50 (pinned first); "Show all" pages through the rest.
   const notes = useMemo(() => {
     const byId = new Map<string, NoteSummary>();
-    for (const page of all.data?.pages ?? []) for (const n of page.items) byId.set(n.id, n);
+    for (const page of (cacheReady ? all.data?.pages : undefined) ?? []) for (const n of page.items) byId.set(n.id, n);
     for (const n of person?.notes ?? []) byId.set(n.id, n);
     return [...byId.values()];
-  }, [all.data, person?.notes]);
+  }, [all.data, cacheReady, person?.notes]);
 
   const total = Math.max(person?.notesCount ?? 0, notes.length);
   const hidden = total - notes.length;

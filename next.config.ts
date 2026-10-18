@@ -13,6 +13,10 @@ const STATIC_CSP_SOURCE = "/((?!login(?:/|$)|oauth/consent(?:/|$)|api/settings/d
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // Automatic memoization (babel-plugin-react-compiler, applied by Next only to files with JSX or
+  // hooks). Opt a component out with "use no memo" (e.g. PeopleVirtualList: @tanstack/react-virtual
+  // returns a mutable instance the compiler can't track).
+  reactCompiler: true,
   // The Agent SDK (Claude subscription path) is only for local use; never trace its CLI binary into functions.
   serverExternalPackages: ["ai-sdk-provider-claude-code", "@anthropic-ai/claude-agent-sdk"],
   outputFileTracingExcludes: { "*": ["./node_modules/.pnpm/@anthropic-ai+claude-agent-sdk*/**", "./node_modules/@anthropic-ai/claude-agent-sdk*/**"] },

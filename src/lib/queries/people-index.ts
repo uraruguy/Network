@@ -7,6 +7,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { filterPeople, isEmpty, type PeopleFilters } from "@/lib/filters/people-filters";
+import { useCacheReady } from "@/lib/offline/useCacheReady";
 import { sortPeople, type SortKey } from "@/lib/filters/sort";
 import { keys } from "./keys";
 import { usePeopleIndex } from "./people";
@@ -30,7 +31,9 @@ export function useDebouncedValue<T>(value: T, delay: number): T {
  */
 export function usePeopleList(filters: PeopleFilters, sort: SortKey) {
   const index = usePeopleIndex();
-  const all = index.data ?? NO_PEOPLE;
+  // Cached rows only once they may render (see useCacheReady): server HTML and hydration agree.
+  const ready = useCacheReady();
+  const all = (ready ? index.data : undefined) ?? NO_PEOPLE;
   const deferredFilters = useDeferredValue(filters);
   const deferredSort = useDeferredValue(sort);
   const rows = useMemo(() => sortPeople(filterPeople(all, deferredFilters), deferredSort, deferredFilters.q), [all, deferredFilters, deferredSort]);
@@ -44,7 +47,7 @@ export function usePeopleList(filters: PeopleFilters, sort: SortKey) {
     /** The visible rows still reflect older filters/sort. */
     isStale: deferredFilters !== filters || deferredSort !== sort,
     /** Nothing to show yet (cache restoring or first fetch). */
-    isPending: index.isPending,
+    isPending: !ready || index.isPending,
     isError: index.isError,
     refetch: index.refetch,
   };

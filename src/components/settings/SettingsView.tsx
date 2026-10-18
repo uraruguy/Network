@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { Avatar } from "@/components/glass/Avatar";
+import { useReadyData } from "@/lib/offline/useCacheReady";
 import { useProfile } from "@/lib/queries/settings";
 import { SettingsIndexList } from "./SettingsNav";
 import { SetupChecklist } from "./sections/SetupSection";
@@ -10,7 +11,7 @@ import { SetupChecklist } from "./sections/SetupSection";
  * lists the sections, so the detail pane shows an overview — who you are and what's left to set up.
  */
 export function SettingsView() {
-  const { data: profile } = useProfile();
+  const profile = useReadyData(useProfile());
   return (
     <>
       <div className="mx-auto max-w-[680px] lg:hidden">

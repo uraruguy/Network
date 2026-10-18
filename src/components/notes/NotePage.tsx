@@ -18,6 +18,7 @@ import { noteScopeId } from "@/lib/notes/cache";
 import { formatNoteLongDate } from "@/lib/notes/grouping";
 import { displayTitle } from "@/lib/notes/title";
 import { useNoteAutosave } from "@/lib/notes/useNoteAutosave";
+import { useCacheReady, useReadyData } from "@/lib/offline/useCacheReady";
 import { deleteNote, restoreNote, useNewNote, useNoteDoc } from "@/lib/queries/notes";
 import { usePersonDetail } from "@/lib/queries/people";
 import { cn } from "@/lib/utils";
@@ -78,9 +79,16 @@ function PaperSkeleton() {
 export function NotePage({ personId: routePersonId, noteId }: { personId: string; noteId: string }) {
   const router = useRouter();
   const qc = useQueryClient();
-  const { data: doc, isPending, isError, refetch } = useNoteDoc(noteId, { personId: routePersonId });
+  // Cached data only once it may render (see useCacheReady): the server HTML and the hydration
+  // render then agree on the skeleton. Client-side navigations have it straight away.
+  const cacheReady = useCacheReady();
+  const docQuery = useNoteDoc(noteId, { personId: routePersonId });
+  const doc = cacheReady ? docQuery.data : undefined;
+  const isPending = !cacheReady || docQuery.isPending;
+  const isError = cacheReady && docQuery.isError;
+  const { refetch } = docQuery;
   const personId = doc?.personId ?? routePersonId;
-  const { data: person } = usePersonDetail(personId);
+  const person = useReadyData(usePersonDetail(personId));
   const EditorModule = useNoteEditorModule();
   const newNote = useNewNote();
   const online = useOnline();

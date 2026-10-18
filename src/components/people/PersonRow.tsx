@@ -1,8 +1,10 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import type { PrefetchKind } from "next/dist/client/components/router-reducer/router-reducer-types";
 import { memo, type CSSProperties } from "react";
 import { Avatar } from "@/components/glass/Avatar";
+import { AvatarTransition, NAV_FORWARD } from "@/components/shell/transitions";
 import { RelativeTime } from "@/components/ui/RelativeTime";
 import { useNow } from "@/lib/clock";
 import type { PeopleRow } from "@/lib/filters/people-filters";
@@ -50,6 +52,13 @@ export function compactDue(date: Date, now: number): string {
   return `in ${Math.round(days / 30)}mo`;
 }
 
+/**
+ * The profile route is dynamic, so a default prefetch stops at its loading.tsx skeleton and the
+ * navigation would commit that skeleton — no avatar to morph into. Prefetch the page itself (a
+ * tiny payload: the profile renders from the cached index).
+ */
+const FULL_PREFETCH = { kind: "full" as PrefetchKind };
+
 const isOverdue = (d: string | Date | null, now: number) => !!d && new Date(d).getTime() < new Date(new Date(now).toDateString()).getTime();
 
 /**
@@ -71,13 +80,13 @@ export const PersonRow = memo(function PersonRow({ p, emojiById, detail = "last"
   const when = detail === "followup" ? p.nextFollowupAt : p.lastInteractionAt;
   const warmth = WARMTH_META[p.warmth];
   // Prefetch on intent rather than on visibility: a fast scroll through 1,000 rows shouldn't fire 1,000 prefetches.
-  const prefetch = () => router.prefetch(href);
+  const prefetch = () => router.prefetch(href, FULL_PREFETCH);
 
   return (
     <Link
       href={href}
       prefetch={false}
-      transitionTypes={["nav-forward"]}
+      transitionTypes={NAV_FORWARD}
       onPointerEnter={prefetch}
       onFocus={prefetch}
       onTouchStart={prefetch}
@@ -92,8 +101,10 @@ export const PersonRow = memo(function PersonRow({ p, emojiById, detail = "last"
         className,
       )}
     >
-      <span className="shrink-0" style={{ viewTransitionName: `avatar-${p.id}` }}>
-        <Avatar name={p.displayName} src={p.avatarUrl} size={44} />
+      <span className="shrink-0">
+        <AvatarTransition personId={p.id}>
+          <Avatar name={p.displayName} src={p.avatarUrl} size={44} />
+        </AvatarTransition>
       </span>
       <span className="flex min-w-0 flex-1 flex-col justify-center">
         <span className="flex min-w-0 items-center gap-1.5">

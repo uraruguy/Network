@@ -9,11 +9,12 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { IconButton } from "@/components/ui/IconButton";
 import { Menu } from "@/components/ui/Menu";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
-import { Skeleton, SkeletonText } from "@/components/ui/Skeleton";
+import { Skeleton, SkeletonRows, SkeletonText } from "@/components/ui/Skeleton";
 import { Tooltip, TooltipProvider } from "@/components/ui/Tooltip";
 import { CATEGORY_SLUGS } from "@/lib/import/contracts";
 import { useIsPhone } from "@/lib/media";
 import { useMotionSafe } from "@/lib/motion";
+import { useCacheReady } from "@/lib/offline/useCacheReady";
 import type { MergeTarget, Proposal } from "@/lib/queries/import-review";
 import { cn } from "@/lib/utils";
 import { BatchCards } from "./BatchCards";
@@ -42,7 +43,10 @@ export function ReviewScreen({ source }: { source: string }) {
   const isPhone = useIsPhone();
 
   const s = useReviewSession(source);
-  const counts = s.status.data?.proposals;
+  // Cached counts and lists only once they may render (see useCacheReady): the server HTML and
+  // the hydration render then agree.
+  const cacheReady = useCacheReady();
+  const counts = cacheReady ? s.status.data?.proposals : undefined;
   const reviewCount = s.loading ? (counts?.proposed ?? 0) : s.progress.remaining;
 
   return (
@@ -85,9 +89,10 @@ export function ReviewScreen({ source }: { source: string }) {
       />
 
       {tab === "review" && <ReviewTab session={s} source={source} onCommit={() => setTab("commit")} />}
-      {tab === "approved" && <ProposalList source={source} tab="approved" />}
-      {tab === "rejected" && <ProposalList source={source} tab="rejected" />}
-      {tab === "commit" && <CommitPanel source={source} onReview={() => setTab("review")} />}
+      {tab !== "review" && !cacheReady && <SkeletonRows count={6} className="surface overflow-hidden rounded-lg" />}
+      {cacheReady && tab === "approved" && <ProposalList source={source} tab="approved" />}
+      {cacheReady && tab === "rejected" && <ProposalList source={source} tab="rejected" />}
+      {cacheReady && tab === "commit" && <CommitPanel source={source} onReview={() => setTab("review")} />}
     </TooltipProvider>
   );
 }

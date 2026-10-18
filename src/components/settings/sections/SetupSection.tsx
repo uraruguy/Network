@@ -6,6 +6,7 @@ import { IconButton } from "@/components/ui/IconButton";
 import { RelativeTime } from "@/components/ui/RelativeTime";
 import { SkeletonRows } from "@/components/ui/Skeleton";
 import type { SetupItem, SetupState } from "@/lib/connections/setup-status";
+import { useReadyData } from "@/lib/offline/useCacheReady";
 import { useSetupStatus } from "@/lib/queries/settings";
 import { formatRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -34,8 +35,10 @@ function Ring({ done, total }: { done: number; total: number }) {
 
 /** The install checklist (also the desktop landing pane of Settings). */
 export function SetupChecklist({ compact }: { compact?: boolean }) {
-  const { data, isPending, isFetching, refetch } = useSetupStatus();
-  if (isPending || !data) {
+  const status = useSetupStatus();
+  const { isFetching, refetch } = status;
+  const data = useReadyData(status);
+  if (!data) {
     return (
       <div className="surface overflow-hidden rounded-lg">
         <SkeletonRows count={compact ? 3 : 6} avatar={false} />
