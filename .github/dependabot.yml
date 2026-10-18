@@ -10,6 +10,10 @@ updates:
     open-pull-requests-limit: 10
     commit-message:
       prefix: deps
+    # @types/node tracks the runtime (.nvmrc is Node 22): its major moves with the runtime, not before.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       next:
         patterns: ["next", "eslint-config-next", "@next/*"]
@@ -27,11 +31,31 @@ updates:
         patterns: ["serwist", "@serwist/*"]
       drizzle:
         patterns: ["drizzle-orm", "drizzle-kit", "postgres"]
+      # Catch-alls. Dependabot puts a package in every group it matches, and a group without patterns
+      # outranks a wildcard pattern, so these would take named-group members (@ai-sdk/react away from
+      # ai) and split exactly-pinned families. Keep both exclude lists equal to the named groups' patterns.
       dev-tooling:
         dependency-type: development
         update-types: [minor, patch]
+        exclude-patterns: ["next", "eslint-config-next", "@next/*",
+          "react", "react-dom", "@types/react", "@types/react-dom", "babel-plugin-react-compiler",
+          "ai", "@ai-sdk/*", "@openrouter/*", "ai-sdk-provider-claude-code", "@modelcontextprotocol/*", "mcp-handler",
+          "@supabase/*",
+          "@tanstack/*",
+          "@tiptap/*",
+          "serwist", "@serwist/*",
+          "drizzle-orm", "drizzle-kit", "postgres"]
       minor-and-patch:
+        dependency-type: production
         update-types: [minor, patch]
+        exclude-patterns: ["next", "eslint-config-next", "@next/*",
+          "react", "react-dom", "@types/react", "@types/react-dom", "babel-plugin-react-compiler",
+          "ai", "@ai-sdk/*", "@openrouter/*", "ai-sdk-provider-claude-code", "@modelcontextprotocol/*", "mcp-handler",
+          "@supabase/*",
+          "@tanstack/*",
+          "@tiptap/*",
+          "serwist", "@serwist/*",
+          "drizzle-orm", "drizzle-kit", "postgres"]
 
   - package-ecosystem: github-actions
     directory: /
