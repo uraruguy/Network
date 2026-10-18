@@ -30,12 +30,12 @@ jobs:
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
       APP_SECRET: ci-placeholder-app-secret-not-a-real-key-0123456789
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # No version input: the action reads "packageManager" from package.json.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -61,10 +61,10 @@ jobs:
     env:
       TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # Pinned to the CLI version the config was last verified with; bump deliberately.
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@v3
         with:
           version: 2.117.0
 
@@ -83,9 +83,9 @@ jobs:
           "insert into auth.users (id, instance_id, email, aud, role)
           values (gen_random_uuid(), '00000000-0000-0000-0000-000000000000', 'ci@example.test', 'authenticated', 'authenticated')"
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: pnpm
