@@ -2,7 +2,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { withOwner } from "@/lib/api-server";
 import { db, schema } from "@/lib/db";
 
-/** Full JSON export of everything the owner has — the data is theirs. */
+/** Full JSON export of everything the owner has — the data is theirs. Re-checks the session with Auth (`fresh`). */
 export const GET = withOwner(async ({ ownerId }) => {
   const [people, notes, reminders, categories, locations, tags, activities] = await Promise.all([
     db.query.people.findMany({
@@ -28,4 +28,4 @@ export const GET = withOwner(async ({ ownerId }) => {
       "content-disposition": `attachment; filename="the-network-${new Date().toISOString().slice(0, 10)}.json"`,
     },
   });
-});
+}, { fresh: true });

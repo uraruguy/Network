@@ -51,6 +51,38 @@ runtime caches (only the public app-shell precache stays). A session that merely
 the caches, so offline edits survive until the owner signs back in. "Sign out other devices"
 (Settings → Security) revokes every other session.
 
+**Revocation lag.** Requests are authenticated locally (JWT signature + expiry, passkey cookie
+bound to the session id), so a revoked session's access token keeps passing for up to an hour.
+The endpoints that hand out everything or change credentials and secrets — `/api/export`,
+`/api/security/**`, `/api/tokens/**`, `/api/settings/connections/**` — use
+`withOwner(…, { fresh: true })`, which also asks the Auth server (`auth.getUser()`) whether the
+session still exists: after "sign out other devices", a password change or a reset, a stolen
+session is refused there at once (401). If Auth can't be reached they fail closed with a 503.
+Everything else keeps the local check (the rest of the API, offline-first reads) and stops when
+the access token expires.
+
+## Connected apps (MCP)
+
+`/api/mcp` accepts personal access tokens (created behind password + passkey, stored as HMACs)
+and OAuth access tokens from Supabase's OAuth 2.1 server (details: [docs/mcp.md](docs/mcp.md)).
+Supabase knows nothing about the passkey and will hand an authorization code to a password-only
+session — even return it in the API response for an app already approved — so an OAuth token is
+honoured only when all of these hold (`src/lib/mcp/auth.ts`):
+
+- the owner has an un-revoked grant for the client, created on the passkey-gated consent page
+  (`/oauth/consent`); scopes come from the grant, not the token;
+- the token's session was created (Supabase's `amr` entry `oauth_provider/authorization_code`)
+  within 10 minutes after a passkey-verified approval of that client — or an explicit *Continue*
+  for an app approved before — recorded in the append-only audit log, and the client wasn't
+  disconnected since (`src/lib/mcp/approvals.ts`); tokens without the claim are refused;
+- the consent page only sends codes to public `https://` redirect URIs — never loopback, private
+  networks or custom schemes, which belong to apps on a computer that should use a personal access
+  token (`src/lib/mcp/consent.ts`); an app approved before needs a click, not just a link.
+
+Residual risk: someone with the password who acts within those 10 minutes could mint a token for
+an approved app; only the current authorization's redirect URI is visible to the app (listing a
+client's registered URIs needs the service-role key, which the app deliberately doesn't hold).
+
 ## Secrets
 
 | Variable | Purpose |

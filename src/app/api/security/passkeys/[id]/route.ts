@@ -22,7 +22,7 @@ export const PATCH = withOwner<{ id: string }>(
     if (!row) throw new HttpError(404, "Not found");
     return { ...row, createdAt: row.createdAt.toISOString(), lastUsedAt: row.lastUsedAt?.toISOString() ?? null };
   },
-  { params },
+  { params, fresh: true },
 );
 
 export const DELETE = withOwner<{ id: string }>(
@@ -33,5 +33,5 @@ export const DELETE = withOwner<{ id: string }>(
     if (!(await deleteCredential(ownerId, id))) throw new HttpError(404, "Not found");
     return { ok: true };
   },
-  { params },
+  { params, fresh: true },
 );

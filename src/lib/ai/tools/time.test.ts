@@ -1,5 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { resolveDue, todayIn, zonedToUtc, zoneOffsetMinutes } from "./time";
+import { isIanaTimeZone, resolveDue, todayIn, zonedToUtc, zoneOffsetMinutes } from "./time";
+
+describe("isIanaTimeZone", () => {
+  it("accepts IANA names", () => {
+    for (const tz of ["Europe/Ljubljana", "America/Argentina/Buenos_Aires", "America/Port-au-Prince", "Etc/GMT+5", "UTC", "Asia/Kolkata", "Asia/Calcutta"]) {
+      expect(isIanaTimeZone(tz), tz).toBe(true);
+    }
+  });
+
+  it("refuses unknown zones, raw offsets (Postgres flips their sign) and junk", () => {
+    for (const tz of ["Mars/Olympus_Mons", "+01:00", "-0500", "Europe/Ljubljana; drop table", "", "x".repeat(65)]) {
+      expect(isIanaTimeZone(tz), tz).toBe(false);
+    }
+  });
+});
+
+describe("unknown zones", () => {
+  it("fall back to UTC instead of throwing a RangeError", () => {
+    const now = new Date("2026-10-17T10:00:00Z");
+    expect(zoneOffsetMinutes(now, "Not/AZone")).toBe(0);
+    expect(todayIn("Not/AZone", now)).toEqual([2026, 10, 17]);
+    expect(resolveDue({ inDays: 1 }, "Not/AZone", now)?.toISOString()).toBe("2026-10-18T09:00:00.000Z");
+  });
+});
 
 describe("zoned time", () => {
   it("knows DST offsets", () => {
