@@ -14,12 +14,13 @@ import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
 import { Tooltip } from "@/components/ui/Tooltip";
 import type { NoteKind } from "@/lib/constants";
-import { noteScopeId } from "@/lib/notes/cache";
+import { isWriteForNote, type NoteDoc } from "@/lib/notes/cache";
 import { formatNoteLongDate } from "@/lib/notes/grouping";
-import { displayTitle } from "@/lib/notes/title";
+import { displayTitle, isBlankContent } from "@/lib/notes/title";
 import { useNoteAutosave } from "@/lib/notes/useNoteAutosave";
 import { useCacheReady, useReadyData } from "@/lib/offline/useCacheReady";
-import { deleteNote, restoreNote, useNewNote, useNoteDoc } from "@/lib/queries/notes";
+import { keys } from "@/lib/queries/keys";
+import { deleteNote, restoreNote, saveNote, useNewNote, useNoteDoc } from "@/lib/queries/notes";
 import { usePersonDetail } from "@/lib/queries/people";
 import { cn } from "@/lib/utils";
 import { isNoteKind, KIND_META } from "./kinds";
@@ -33,7 +34,7 @@ const useOnline = () => useSyncExternalStore(subscribeOnline, () => onlineManage
 
 /** Shows nothing normally; "Offline" when offline, "Saving…" when a save has been pending > 2s. */
 function SaveIndicator({ noteId }: { noteId: string }) {
-  const pending = useIsMutating({ predicate: (m) => m.options.scope?.id === noteScopeId(noteId) }) > 0;
+  const pending = useIsMutating({ predicate: (m) => isWriteForNote(m, noteId) }) > 0;
   const online = useOnline();
   const [slow, setSlow] = useState(false);
   useEffect(() => {
@@ -102,11 +103,14 @@ export function NotePage({ personId: routePersonId, noteId }: { personId: string
   // Unsaved drafts open with the caret in them (Title line, or the end of carried-over text).
   const [isNew] = useState(() => !!doc?.localOnly);
 
+  // Set once a refused save forked this note into a copy (see below): nothing more is saved here.
+  const forked = useRef(false);
+
   const deleted = !!doc?.deleted;
   const autosave = useNoteAutosave({
     noteId,
     personId,
-    read: () => (api.current && !api.current.editor.isDestroyed ? api.current.read() : null),
+    read: () => (api.current && !api.current.editor.isDestroyed && !forked.current ? api.current.read() : null),
     disabled: deleted || removing,
   });
 
@@ -133,10 +137,11 @@ export function NotePage({ personId: routePersonId, noteId }: { personId: string
     router.replace(`/people/${to.id}/notes/${noteId}`);
   };
 
-  // ⌘N: another note for this person. ⌘⌫ (outside the text): delete this one.
+  // ⌘N: another note for this person. ⌘⌫ (outside the text): delete this one. Capture phase, so
+  // this runs before the shell's ⌘N (New person), which skips handled events.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+      if (e.defaultPrevented || e.repeat || !(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
       if (e.key.toLowerCase() === "n") {
         e.preventDefault();
         newNote(personId);
@@ -147,9 +152,36 @@ export function NotePage({ personId: routePersonId, noteId }: { personId: string
         remove();
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [newNote, personId, remove]);
+
+  // Another device's newer version replaces what the editor opened with (the cached copy), as
+  // long as nothing typed here is unsaved — then the next save is refused and both are kept.
+  useEffect(() => {
+    if (doc) autosave.serverDoc(doc, api.current);
+  }, [autosave, doc]);
+
+  // That refused save kept the local words as a new note: continue there (it shows exactly what
+  // was typed here, including the last unsaved keystrokes); the other version stays in this note.
+  const forkedTo = doc?.forkedTo;
+  useEffect(() => {
+    if (!forkedTo || forked.current) return;
+    const words = api.current && !api.current.editor.isDestroyed ? api.current.read() : null;
+    forked.current = true;
+    qc.setQueryData<NoteDoc>(keys.note(noteId), (p) => (p ? { ...p, forkedTo: undefined } : p));
+    const copy = qc.getQueryData<NoteDoc>(keys.note(forkedTo));
+    if (words && copy && copy.contentText !== words.text) {
+      saveNote(qc, forkedTo, { personId: copy.personId, title: words.title, contentJson: words.json, contentMd: words.md, contentText: words.text, baseVersions: copy.baseVersions }, { content: true });
+    }
+    toast({
+      title: "Edited on another device",
+      description: "Your changes are kept in this copy. The other version is still there.",
+      duration: 8000,
+      action: { label: "Show Other", onClick: () => router.push(`/people/${personId}/notes/${noteId}`) },
+    });
+    router.replace(`/people/${copy?.personId ?? personId}/notes/${forkedTo}`);
+  }, [forkedTo, noteId, personId, qc, router]);
 
   const occurredAt = doc ? new Date(doc.occurredAt) : new Date();
   const kind: NoteKind = doc && isNoteKind(doc.kind) ? doc.kind : "note";
@@ -228,13 +260,10 @@ export function NotePage({ personId: routePersonId, noteId }: { personId: string
               size="sm"
               variant="soft"
               onClick={() => {
-                const content = api.current?.read();
-                restoreNote(
-                  qc,
-                  noteId,
-                  personId,
-                  content ? { title: content.title, contentJson: content.json, contentMd: content.md, contentText: content.text } : undefined,
-                );
+                // The editor's words come back with it; a blank editor brings back the last saved words.
+                const content = api.current && !api.current.editor.isDestroyed ? api.current.read() : null;
+                const body = content && !isBlankContent({ title: content.title, contentText: content.text }) ? { title: content.title, contentJson: content.json, contentMd: content.md, contentText: content.text } : undefined;
+                restoreNote(qc, noteId, personId, body);
               }}
             >
               <RotateCcw size={15} aria-hidden /> Restore
@@ -264,7 +293,8 @@ export function NotePage({ personId: routePersonId, noteId }: { personId: string
               toolbarSlot={toolbarSlot}
               onReady={(a) => {
                 api.current = a;
-                autosave.ready(a.read());
+                autosave.ready(a.read(), a.source);
+                if (doc) autosave.serverDoc(doc, a);
               }}
               onChange={autosave.changed}
             />

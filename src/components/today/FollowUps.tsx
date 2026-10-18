@@ -17,7 +17,7 @@ import { useReminders, useReminderWrites, type ReminderSnapshot, type ReminderWi
 import type { Stats } from "@/lib/queries/types";
 import { cn } from "@/lib/utils";
 import { Section } from "./Section";
-import { daysOverdue, splitReminders, startOfDay, weekHorizon } from "./today-data";
+import { bumpStats, daysOverdue, splitReminders, startOfDay } from "./today-data";
 
 const rowKey = (r: Pick<ReminderWithPerson, "id" | "dueAt">) => `${r.id}@${new Date(r.dueAt).toISOString()}`;
 /** Time the check mark gets to pop before the write (and its optimistic removal) goes out. */
@@ -27,7 +27,9 @@ const POP_MS = 380;
 export function FollowUps() {
   const now = useNow();
   const qc = useQueryClient();
-  const reminders = useReminders({ until: weekHorizon(now).toISOString() });
+  // Every open follow-up under one stable key, split by day on the client: a cold start on a
+  // new day (offline too) still has yesterday's cached list to show.
+  const reminders = useReminders();
   const ready = useQueryReady(reminders);
   const data = ready ? reminders.data : undefined;
   // Optimistic, offline-safe writes serialised per reminder (done -> undo stay in order).
@@ -45,13 +47,8 @@ export function FollowUps() {
   }, []);
 
   // The tile updates instantly; the writes' settle refetches the real numbers.
-  const bumpStats = useCallback(
-    (r: ReminderWithPerson, delta: number) => {
-      const overdue = new Date(r.dueAt).getTime() < startOfDay(Date.now()).getTime();
-      qc.setQueryData<Stats>(keys.stats(), (s) =>
-        s ? { ...s, overdue: Math.max(0, s.overdue + (overdue ? delta : 0)), dueToday: Math.max(0, s.dueToday + (overdue ? 0 : delta)) } : s,
-      );
-    },
+  const bump = useCallback(
+    (r: ReminderWithPerson, delta: number) => qc.setQueryData<Stats>(keys.stats(), (s) => (s ? bumpStats(s, r.dueAt, Date.now(), delta) : s)),
     [qc],
   );
 
@@ -68,7 +65,7 @@ export function FollowUps() {
         dueAt: r.dueAt,
       };
       mark(key, true);
-      bumpStats(r, -1);
+      bump(r, -1);
       // Let the check pop first; the optimistic "done" then removes the row, which folds away.
       timers.current.set(
         key,
@@ -82,7 +79,7 @@ export function FollowUps() {
           Done · <span className="font-normal text-fg-2">{r.person.displayName}</span>
         </>,
         () => {
-          bumpStats(r, +1);
+          bump(r, +1);
           mark(key, false);
           const pending = timers.current.get(key);
           if (pending) {
@@ -96,7 +93,7 @@ export function FollowUps() {
         { description: r.message || undefined },
       );
     },
-    [bumpStats, mark, writes],
+    [bump, mark, writes],
   );
 
   const loading = !ready;

@@ -107,5 +107,7 @@ export function useSecurityOverview({ enabled = true }: { enabled?: boolean } = 
     queryFn: () => api.get<SecurityOverview>("/api/security"),
     staleTime: 5 * 60_000,
     enabled,
+    // Passkeys, sessions and sign-in history stay off the device's disk.
+    meta: { persist: false },
   });
 }

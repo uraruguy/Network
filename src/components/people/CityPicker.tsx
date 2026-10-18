@@ -28,8 +28,9 @@ const toItem = (location: LocationInput): Item => ({ key: location.cityId ? `cit
 export const cityLabel = (l: Pick<LocationInput, "name" | "country">) => `${l.name}, ${l.country}`;
 
 /**
- * City search over the GeoNames dataset (`/api/geocode`), cached per query so repeat searches and
- * offline use are instant. Diacritic-insensitive on the server ("ljublj" → Ljubljana).
+ * City search over the GeoNames dataset (`/api/geocode`), cached per query in memory so repeat
+ * searches are instant (lookups are volatile and never persisted to the device). Diacritic-
+ * insensitive on the server ("ljublj" → Ljubljana).
  */
 export function CityPicker({ value, onChange, placeholder = "City", autoFocus, disabled, id, ...aria }: Props) {
   const qc = useQueryClient();
@@ -39,7 +40,14 @@ export function CityPicker({ value, onChange, placeholder = "City", autoFocus, d
     async (q: string): Promise<Item[]> => {
       const text = q.trim();
       if (text.length < 2) return [];
-      const cities = await qc.fetchQuery({ queryKey: keys.cities(text), queryFn: () => api.get<City[]>(`/api/geocode?q=${encodeURIComponent(text)}`), staleTime: 60 * 60_000 });
+      const cities = await qc.fetchQuery({
+        queryKey: keys.cities(text),
+        queryFn: () => api.get<City[]>(`/api/geocode?q=${encodeURIComponent(text)}`),
+        staleTime: 60 * 60_000,
+        // One entry per typed prefix: kept in memory for the session, never persisted.
+        gcTime: 60 * 60_000,
+        meta: { persist: false },
+      });
       return cities.map((c) => toItem(cityToLocation(c)));
     },
     [qc],

@@ -35,6 +35,7 @@ import { Chip } from "@/components/glass/Chip";
 import { GlassButton } from "@/components/glass/GlassButton";
 import { FollowUpSheet } from "@/components/followups/FollowUpSheet";
 import { QuickImportSheet } from "@/components/import/QuickImportSheet";
+import { primeKeyboard } from "@/components/notes/keyboard";
 import { PersonNotesSection } from "@/components/notes/PersonNotesSection";
 import { confirm } from "@/components/ui/confirm";
 import { AvatarTransition } from "@/components/shell/transitions";
@@ -50,6 +51,7 @@ import { toast } from "@/components/ui/Toast";
 import { useNow } from "@/lib/clock";
 import { formatDate, formatRelative, localTimeIn } from "@/lib/format";
 import { displayTitle } from "@/lib/notes/title";
+import { useNewNote } from "@/lib/queries/notes";
 import { useCategories, usePersonProfile, usePersonWrites } from "@/lib/queries/people";
 import { useCacheReady } from "@/lib/offline/useCacheReady";
 import { isTempId } from "@/lib/queries/people-cache";
@@ -116,6 +118,7 @@ export function PersonDetail({ id }: { id: string }) {
   const params = useSearchParams();
   const now = useNow();
   const writes = usePersonWrites();
+  const startNote = useNewNote();
   const { person, preview, notFound } = usePersonProfile(id);
   const { data: categories } = useCategories();
   const { data: activities } = useActivities();
@@ -170,7 +173,11 @@ export function PersonDetail({ id }: { id: string }) {
   const ahead = offsetLabel(offsetDiffMinutes(tz, now));
   const role = [head.headline, head.company].filter(Boolean).join(" · ");
 
-  const newNote = () => router.push(`/people/${id}/notes/${crypto.randomUUID()}`);
+  // Same path as every "New note": a local draft first (opens offline too), caret in it.
+  const newNote = () => {
+    primeKeyboard();
+    startNote(id);
+  };
 
   const remove = async () => {
     const ok = await confirm({

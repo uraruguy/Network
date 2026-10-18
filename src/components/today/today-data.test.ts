@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dayKey, daysOverdue, greeting, reconnectCandidates, silenceLabel, splitReminders, weekHorizon } from "./today-data";
+import { bumpStats, dayKey, daysOverdue, greeting, reconnectCandidates, silenceLabel, splitReminders, weekHorizon } from "./today-data";
 
 const at = (y: number, m: number, d: number, h = 12) => new Date(y, m - 1, d, h, 0, 0);
 const NOW = at(2026, 10, 17, 15);
@@ -31,6 +31,26 @@ describe("splitReminders", () => {
   it("uses a horizon at the end of the 7th day", () => {
     expect(weekHorizon(NOW).getDate()).toBe(24);
     expect(weekHorizon(NOW).getHours()).toBe(23);
+  });
+});
+
+describe("bumpStats", () => {
+  const stats = { people: 9, overdue: 2, dueToday: 3, upcoming7d: 4 };
+
+  it("moves the counter the follow-up's due date falls in", () => {
+    expect(bumpStats(stats, at(2026, 10, 10), NOW, -1)).toMatchObject({ overdue: 1, dueToday: 3, upcoming7d: 4 });
+    expect(bumpStats(stats, at(2026, 10, 17, 9), NOW, -1)).toMatchObject({ overdue: 2, dueToday: 2, upcoming7d: 4 });
+    expect(bumpStats(stats, at(2026, 10, 17, 23), NOW, -1)).toMatchObject({ dueToday: 2 });
+  });
+
+  it("leaves Due today alone for an upcoming (this-week) follow-up", () => {
+    expect(bumpStats(stats, at(2026, 10, 18, 9), NOW, -1)).toMatchObject({ overdue: 2, dueToday: 3, upcoming7d: 3 });
+    expect(bumpStats(stats, at(2026, 11, 30), NOW, -1)).toBe(stats);
+  });
+
+  it("undo puts it back, and never goes below zero", () => {
+    expect(bumpStats(stats, at(2026, 10, 18, 9), NOW, +1)).toMatchObject({ upcoming7d: 5 });
+    expect(bumpStats({ ...stats, dueToday: 0 }, at(2026, 10, 17), NOW, -1)).toMatchObject({ dueToday: 0 });
   });
 });
 

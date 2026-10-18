@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { planLeave, planSave, type AutosaveState, type ContentSnapshot } from "./autosave";
+import { initialChain, planLeave, planSave, planServerDoc, type AutosaveState, type ContentSnapshot } from "./autosave";
+import { contentVersion } from "./version";
 
 const draft: AutosaveState = { persisted: false, lastSaved: null };
 const saved: AutosaveState = { persisted: true, lastSaved: "v1" };
@@ -41,5 +42,32 @@ describe("planLeave", () => {
 
   it("does nothing for a saved note whose editor never loaded", () => {
     expect(planLeave(saved, null)).toBe("nothing");
+  });
+});
+
+describe("initialChain", () => {
+  it("bases the first save on the version the editor opened", () => {
+    const doc = { contentText: "Coffee", contentMd: "Coffee" };
+    expect(initialChain(doc)).toEqual([contentVersion(doc)]);
+  });
+
+  it("is empty for a draft (its first save creates the note) and keeps a queued save's chain", () => {
+    expect(initialChain({ localOnly: true, contentText: "", contentMd: "" })).toEqual([]);
+    expect(initialChain({ baseVersions: ["v1", "v2"], contentText: "x" })).toEqual(["v1", "v2"]);
+  });
+});
+
+describe("planServerDoc", () => {
+  it("recognises our own save landing", () => {
+    expect(planServerDoc(["v1", "v2"], "v2", false)).toBe("confirm");
+    expect(planServerDoc(["v1", "v2"], "v2", true)).toBe("confirm");
+  });
+
+  it("adopts another device's newer version when nothing here is unsaved (stale cache on open)", () => {
+    expect(planServerDoc(["cached"], "from-mac", false)).toBe("adopt");
+  });
+
+  it("keeps unsaved local words (the next save is refused and both versions are kept)", () => {
+    expect(planServerDoc(["cached"], "from-mac", true)).toBe("keep");
   });
 });

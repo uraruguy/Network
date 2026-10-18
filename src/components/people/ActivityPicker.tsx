@@ -34,7 +34,9 @@ type Props = {
 
 /**
  * "Do together": the user's activities as emoji chips (their own order), multi-select. "New"
- * creates one optimistically — it appears and is selected at once, the server catches up.
+ * creates one optimistically — it appears and is selected at once, the server catches up. The
+ * create is queued so that the person save using it waits for it (offline too; see
+ * lib/queries/write-order), or the server would drop the unknown id.
  */
 export function ActivityPicker({ value, onChange, id, className }: Props) {
   const qc = useQueryClient();

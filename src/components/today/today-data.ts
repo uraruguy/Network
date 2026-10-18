@@ -58,6 +58,20 @@ export function splitReminders<T extends Dated>(rows: readonly T[], now: number 
   return { due, week, overdue };
 }
 
+export type StatCounts = { overdue: number; dueToday: number; upcoming7d: number };
+
+/**
+ * The Today tiles after completing (-1) or un-completing (+1) one open follow-up: the counter
+ * its due date falls in (overdue · due today · the next 7 days, as /api/stats counts them), and
+ * nothing for later ones.
+ */
+export function bumpStats<T extends StatCounts>(stats: T, dueAt: string | Date, now: number | Date, delta: number): T {
+  const t = new Date(dueAt).getTime();
+  const field: keyof StatCounts | null =
+    t < startOfDay(now).getTime() ? "overdue" : t <= endOfDay(now).getTime() ? "dueToday" : t <= weekHorizon(now).getTime() ? "upcoming7d" : null;
+  return field ? { ...stats, [field]: Math.max(0, stats[field] + delta) } : stats;
+}
+
 /** Whole days between a due date and today's midnight (positive = overdue). */
 export function daysOverdue(dueAt: string | Date, now: number | Date): number {
   return Math.round((startOfDay(now).getTime() - startOfDay(new Date(dueAt)).getTime()) / DAY);

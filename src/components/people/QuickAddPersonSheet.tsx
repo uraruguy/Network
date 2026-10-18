@@ -82,6 +82,8 @@ function Host() {
     };
   }, []);
 
+  // Pages that give ⌘N its own meaning (person and note pages: a new note) handle it in the
+  // capture phase and preventDefault; handled events are skipped here, so one press = one action.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.repeat || e.altKey || e.shiftKey) return;

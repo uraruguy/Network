@@ -32,6 +32,8 @@ export const TAXONOMY_MUT = {
   mergeTags: ["tags", "merge"] as const,
 };
 
+const ACTIVITY_CREATE_SCOPE = "activities:create";
+
 function invalidateTaxonomy(qc: QueryClient) {
   qc.invalidateQueries({ queryKey: keys.activities() });
   qc.invalidateQueries({ queryKey: keys.tags() });
@@ -75,9 +77,13 @@ export function registerTaxonomyMutations(qc: QueryClient) {
   });
 }
 
-/** Creates an activity; a client id is attached at call time so offline replays are idempotent. */
+/**
+ * Creates an activity; a client id is attached at call time so offline replays are idempotent.
+ * Creates queue in one scope that a person write referencing a new activity joins (see
+ * ./write-order), so the activity exists before the person is linked to it.
+ */
 export function useCreateActivity() {
-  const m = useMutation<ActivityRow, Error, ActivityInput>({ mutationKey: TAXONOMY_MUT.createActivity });
+  const m = useMutation<ActivityRow, Error, ActivityInput>({ mutationKey: TAXONOMY_MUT.createActivity, scope: { id: ACTIVITY_CREATE_SCOPE } });
   return { ...m, mutate: (input: ActivityInput, opts?: Parameters<typeof m.mutate>[1]) => m.mutate({ ...input, id: input.id ?? crypto.randomUUID() }, opts) };
 }
 export const useUpdateActivity = () => useMutation<ActivityRow, Error, { id: string; patch: ActivityPatch }>({ mutationKey: TAXONOMY_MUT.updateActivity });

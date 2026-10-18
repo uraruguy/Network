@@ -1,5 +1,5 @@
 "use client";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { AiConnectionView, UiAiProvider } from "@/lib/connections/ai";
 import type { AiTestResult } from "@/lib/connections/ai-test";
@@ -33,11 +33,22 @@ export function useProfile() {
   return useQuery({ queryKey: keys.profile(), queryFn: () => api.get<ProfileDetail>("/api/profile"), staleTime: 5 * 60_000 });
 }
 
-export function useUpdateProfile() {
-  const qc = useQueryClient();
-  return useMutation({
+export const SETTINGS_MUT = {
+  profile: ["settings", "profile"] as const,
+  reorderCategories: ["settings", "categories", "reorder"] as const,
+};
+
+type ProfileContext = { previous?: ProfileDetail };
+type ReorderContext = { previous?: Category[] };
+
+/**
+ * Mutation defaults for settings writes that work offline (profile, category order), so a change
+ * queued offline resumes after a reload. Each runs in one scope, keeping changes in order.
+ */
+export function registerSettingsMutations(qc: QueryClient) {
+  qc.setMutationDefaults<ProfileDetail, Error, ProfilePatch, ProfileContext>(SETTINGS_MUT.profile, {
     mutationFn: (patch: ProfilePatch) => api.patch<ProfileDetail>("/api/profile", patch),
-    onMutate: async (patch) => {
+    onMutate: async (patch: ProfilePatch) => {
       // Optimistic for the simple fields so switches and pickers feel instant.
       await qc.cancelQueries({ queryKey: keys.profile() });
       const previous = qc.getQueryData<ProfileDetail>(keys.profile());
@@ -47,15 +58,41 @@ export function useUpdateProfile() {
       }
       return { previous };
     },
-    onError: (_err, _patch, ctx) => {
+    onError: (_err: Error, _patch: ProfilePatch, ctx: ProfileContext | undefined) => {
       if (ctx?.previous) qc.setQueryData(keys.profile(), ctx.previous);
     },
-    onSuccess: (data) => {
+    onSuccess: (data: ProfileDetail) => {
       qc.setQueryData(keys.profile(), data);
       qc.invalidateQueries({ queryKey: keys.globe() });
       qc.invalidateQueries({ queryKey: keys.stats() });
     },
   });
+  qc.setMutationDefaults<CategoryRow[], Error, string[], ReorderContext>(SETTINGS_MUT.reorderCategories, {
+    mutationFn: (ids: string[]) => api.post<CategoryRow[]>("/api/settings/categories/reorder", { ids }),
+    onMutate: (ids: string[]) => {
+      const previous = qc.getQueryData<Category[]>(keys.categories());
+      if (previous) {
+        const order = new Map(ids.map((id, i) => [id, i]));
+        qc.setQueryData<Category[]>(
+          keys.categories(),
+          [...previous].sort((a, b) => (order.get(a.id) ?? 1e9) - (order.get(b.id) ?? 1e9)).map((c, i) => ({ ...c, sort: i + 1 })),
+        );
+      }
+      return { previous };
+    },
+    onError: (_e: Error, _ids: string[], ctx: ReorderContext | undefined) => {
+      if (ctx?.previous) qc.setQueryData(keys.categories(), ctx.previous);
+    },
+    onSuccess: (rows: CategoryRow[]) => {
+      // The response carries counts, i.e. exactly the taxonomy's category rows.
+      qc.setQueryData<Taxonomy>(keys.taxonomy(), (old) => (old ? { ...old, categories: rows as Taxonomy["categories"] } : old));
+    },
+    onSettled: () => invalidateCategories(qc),
+  });
+}
+
+export function useUpdateProfile() {
+  return useMutation<ProfileDetail, Error, ProfilePatch, ProfileContext>({ mutationKey: SETTINGS_MUT.profile, scope: { id: "settings:profile" } });
 }
 
 /* ---------- connections ---------- */
@@ -157,14 +194,16 @@ export function useSendDigestPreview() {
 
 export type CategoryRow = Category & { count?: number };
 
+function invalidateCategories(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: keys.categories() });
+  qc.invalidateQueries({ queryKey: keys.taxonomy() });
+  qc.invalidateQueries({ queryKey: ["people"] });
+  qc.invalidateQueries({ queryKey: ["person"] });
+}
+
 function useInvalidateCategories() {
   const qc = useQueryClient();
-  return () => {
-    qc.invalidateQueries({ queryKey: keys.categories() });
-    qc.invalidateQueries({ queryKey: keys.taxonomy() });
-    qc.invalidateQueries({ queryKey: ["people"] });
-    qc.invalidateQueries({ queryKey: ["person"] });
-  };
+  return () => invalidateCategories(qc);
 }
 
 export function useCreateCategory() {
@@ -187,28 +226,5 @@ export function useDeleteCategory() {
 }
 
 export function useReorderCategories() {
-  const qc = useQueryClient();
-  const done = useInvalidateCategories();
-  return useMutation({
-    mutationFn: (ids: string[]) => api.post<CategoryRow[]>("/api/settings/categories/reorder", { ids }),
-    onMutate: (ids) => {
-      const previous = qc.getQueryData<Category[]>(keys.categories());
-      if (previous) {
-        const order = new Map(ids.map((id, i) => [id, i]));
-        qc.setQueryData<Category[]>(
-          keys.categories(),
-          [...previous].sort((a, b) => (order.get(a.id) ?? 1e9) - (order.get(b.id) ?? 1e9)).map((c, i) => ({ ...c, sort: i + 1 })),
-        );
-      }
-      return { previous };
-    },
-    onError: (_e, _ids, ctx) => {
-      if (ctx?.previous) qc.setQueryData(keys.categories(), ctx.previous);
-    },
-    onSuccess: (rows) => {
-      // The response carries counts, i.e. exactly the taxonomy's category rows.
-      qc.setQueryData<Taxonomy>(keys.taxonomy(), (old) => (old ? { ...old, categories: rows as Taxonomy["categories"] } : old));
-    },
-    onSettled: done,
-  });
+  return useMutation<CategoryRow[], Error, string[], ReorderContext>({ mutationKey: SETTINGS_MUT.reorderCategories, scope: { id: "settings:categories" } });
 }
