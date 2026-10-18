@@ -151,6 +151,39 @@ describe("verifyToken — OAuth access tokens", () => {
     expect(log.approvalEvidence).not.toHaveBeenCalled();
   });
 
+  it("accepts a real Supabase OAuth token and its refresh (claims from GoTrue v2.196, local run)", async () => {
+    const issued = {
+      iss: "http://127.0.0.1:54321/auth/v1",
+      sub: OWNER,
+      aud: "authenticated",
+      exp: 1_792_362_560,
+      iat: 1_792_358_960,
+      email: "dev@local.test",
+      phone: "",
+      app_metadata: { provider: "email", providers: ["email"] },
+      user_metadata: { email_verified: true },
+      role: "authenticated",
+      aal: "aal1",
+      amr: [{ method: "oauth_provider/authorization_code", timestamp: 1_792_358_960 }],
+      session_id: "11607901-1ec8-47f4-a761-f9bf9346f250",
+      is_anonymous: false,
+      client_id: "6377643f-b46c-489d-8f3f-dbb098a3582e",
+      scope: "email",
+    };
+    const refreshed = { ...issued, iat: 1_792_359_047, exp: 1_792_362_647 };
+    grants.findGrantRecord.mockResolvedValue(grant(issued.client_id, { clientName: "MCP Inspector" }));
+    log.approvalEvidence.mockResolvedValue({ approvedAt: new Date("2026-10-18T21:29:20.307Z"), revokedAt: null });
+    for (const claims of [issued, refreshed]) {
+      supa.getClaims.mockResolvedValueOnce({ data: { claims }, error: null });
+      const info = await verifyToken(req, "eyJ.real");
+      expect(info?.scopes).toEqual(["network:read"]); // the grant's, not the token's "email"
+      expect(toolCtxFromAuth(info).actor.credential).toBe(`oauth:${issued.client_id}`);
+    }
+    // One lookup for the session: the refreshed token keeps session_id and the exchange time.
+    expect(log.approvalEvidence).toHaveBeenCalledTimes(1);
+    expect(log.approvalEvidence).toHaveBeenCalledWith(OWNER, issued.client_id, new Date("2026-10-18T21:29:20Z"));
+  });
+
   it("falls back to UTC for a broken profile time zone", async () => {
     supa.getClaims.mockResolvedValue(jwt("client-h"));
     grants.findGrantRecord.mockResolvedValue(grant("client-h", { timezone: "Mars/Olympus_Mons" }));

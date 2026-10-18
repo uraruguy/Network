@@ -15,6 +15,13 @@ describe("oauthSessionStart", () => {
     expect(oauthSessionStart(amr)).toEqual(new Date(1_792_000_100_000));
   });
 
+  it("is the same for a token and its refresh (real Supabase amr, GoTrue v2.196)", () => {
+    const issued = [{ method: "oauth_provider/authorization_code", timestamp: 1_792_358_960 }];
+    const refreshed = [{ method: "oauth_provider/authorization_code", timestamp: 1_792_358_960 }]; // iat moved on, amr didn't
+    expect(oauthSessionStart(refreshed)).toEqual(oauthSessionStart(issued));
+    expect(oauthSessionStart(issued)).toEqual(new Date("2026-10-18T21:29:20Z"));
+  });
+
   it("is null when the token doesn't say", () => {
     expect(oauthSessionStart(undefined)).toBeNull();
     expect(oauthSessionStart([{ method: "password", timestamp: 1 }])).toBeNull();
@@ -30,6 +37,13 @@ describe("approval window", () => {
     const { from, to } = approvalWindow(start);
     expect(start.getTime() - from.getTime()).toBe(APPROVAL_WINDOW_MS);
     expect(to.getTime() - start.getTime()).toBe(APPROVAL_SKEW_MS);
+  });
+
+  it("admits an approval logged just after the session's whole-second timestamp", () => {
+    // Real run: the consent page logged the approval at .307 s, Supabase stamped the exchange as :20 (truncated).
+    const { from, to } = approvalWindow(new Date("2026-10-18T21:29:20Z"));
+    const approvedAt = new Date("2026-10-18T21:29:20.307Z");
+    expect(approvedAt >= from && approvedAt <= to).toBe(true);
   });
 
   it("needs an approval, and no disconnect after it", () => {

@@ -54,6 +54,12 @@ describe("persisting writes", () => {
     expect(isReplayableWrite(undefined, {})).toBe(false);
   });
 
+  it("never replays or persists a merge in flight (online-only)", () => {
+    expect(isReplayableWrite(["people", "merge"], { id: "a", into: "b" })).toBe(false);
+    expect(isReplayableWrite(["people", "update"], { id: "a" })).toBe(true);
+    expect(shouldPersistMutation(m(["people", "merge"], { variables: { id: "a", into: "b" } }))).toBe(false);
+  });
+
   it("restores in-flight writes as paused so they resume with the rest", () => {
     const client = {
       timestamp: 1,

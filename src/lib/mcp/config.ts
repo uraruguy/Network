@@ -17,5 +17,3 @@ export const RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource/api
 
 /** Supabase Auth's issuer — the authorization server MCP clients discover. */
 export const authServerIssuer = () => `${trimSlash(clientEnv.NEXT_PUBLIC_SUPABASE_URL)}/auth/v1`;
-
-export const MCP_SCOPES = ["network:read", "network:write"] as const;

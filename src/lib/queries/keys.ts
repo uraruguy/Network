@@ -11,6 +11,8 @@ export const keys = {
   peopleIndex: () => ["people", "index"] as const,
   peopleSearch: (filters: Filters) => ["people", "search", filters] as const,
   person: (id: string) => ["person", id] as const,
+  /** Dry run of merging `id` into `into` (never persisted: it's a live preview). */
+  mergePreview: (id: string, into: string) => ["merge-preview", id, into] as const,
   personNotes: (personId: string) => ["notes", "person", personId] as const,
   note: (id: string) => ["note", id] as const,
   recentNotes: () => ["notes", "recent"] as const,
