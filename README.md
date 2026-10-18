@@ -193,6 +193,8 @@ Every pipeline command is a **dry run without `--write`**, refuses a non-local d
 Step by step, with the subagent workflow and a rehearsal on a local copy:
 [docs/import.md](docs/import.md).
 
+Two cards for one person: **More → Merge with…** on either (People suggests same-name pairs).
+
 Shorter: **Import → Paste a note** takes any text (a note, an e-mail, a call transcript), finds the
 people and files it after you confirm.
 

@@ -143,6 +143,17 @@ categories, activities, mentions in your own notes, people they introduced, chat
 them. Fields the commit filled go back to their previous value even if you changed them since
 (the log stores only the previous values). The app's commit panel has the same undo.
 
+## Duplicates the import missed
+
+When two cards turn out to be one person, open either and choose **More → Merge with…** (People
+also lists same-name cards under *Possible duplicates*). Pick the card to keep and the sheet previews
+what moves onto it: notes, follow-ups, mentions, introductions, chats, categories, tags and
+activities; blank fields are filled from the other card, two imported key-facts notes become one, and
+import proposals point at the kept person, so the next commit fills it instead of recreating the
+duplicate. The other card is soft-deleted. It needs a connection and can't be undone from the app.
+The terminal equivalent is `pnpm tsx scripts/import/merge-people.ts --from <duplicate> --into <kept>`
+(dry run without `--write`); both are logged as `person.merge` in the audit log.
+
 ## Rehearsal on a local copy
 
 ```bash

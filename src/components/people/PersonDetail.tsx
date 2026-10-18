@@ -15,6 +15,7 @@ import {
   Link2,
   Mail,
   MapPin,
+  Merge,
   MessageCircle,
   MessageSquareText,
   MoreHorizontal,
@@ -61,6 +62,7 @@ import { cn, flag, WARMTH_META } from "@/lib/utils";
 import { CategoryIcon } from "./CategoryIcon";
 import { CircleBadge } from "./CirclePicker";
 import { contactLinks, offsetDiffMinutes, offsetLabel, type ContactKind, type ContactLink } from "./contact";
+import { MergePersonSheet } from "./MergePersonSheet";
 import { EditPersonSheet } from "./PersonSheet";
 import { ReminderRow } from "./ReminderRow";
 import { WarmthDot } from "./WarmthPicker";
@@ -125,6 +127,7 @@ export function PersonDetail({ id }: { id: string }) {
   const [editing, setEditing] = useState(false);
   const [followUp, setFollowUp] = useState(() => params.get("reminder") === "1");
   const [importing, setImporting] = useState(false);
+  const [merging, setMerging] = useState(false);
   const nameRef = useRef<HTMLHeadingElement>(null);
 
   // ?reminder=1 (deep link from elsewhere) opens the follow-up sheet once; drop it from the URL.
@@ -199,6 +202,7 @@ export function PersonDetail({ id }: { id: string }) {
     { label: "Edit", icon: <Pencil />, onSelect: () => setEditing(true), shortcut: "E" },
     { label: "Add follow-up", icon: <Bell />, onSelect: () => setFollowUp(true) },
     { label: "Paste from Apple Notes", icon: <ClipboardPaste />, onSelect: () => setImporting(true) },
+    { label: "Merge with…", icon: <Merge />, onSelect: () => setMerging(true) },
     "separator",
     { label: "Remove from Network", icon: <Trash2 />, destructive: true, onSelect: () => void remove() },
   ];
@@ -317,6 +321,13 @@ export function PersonDetail({ id }: { id: string }) {
       {person && <EditPersonSheet person={person} open={editing} onClose={() => setEditing(false)} />}
       <FollowUpSheet open={followUp} onOpenChange={setFollowUp} personId={id} personName={name} />
       <QuickImportSheet open={importing} onOpenChange={setImporting} personId={id} personName={name} />
+      <MergePersonSheet
+        open={merging}
+        onOpenChange={setMerging}
+        person={{ ...head, createdAt: person?.createdAt ?? preview?.createdAt }}
+        // Kept the other card: this page's person is gone, so continue on theirs.
+        onMerged={(kept) => kept.id !== id && router.replace(`/people/${kept.id}`)}
+      />
       <EditShortcut onEdit={() => person && setEditing(true)} />
     </div>
   );
