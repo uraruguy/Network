@@ -44,7 +44,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: headScript }} />
       </head>
       <body className="min-h-dvh antialiased">
-        <SerwistProvider swUrl="/sw.js">
+        {/* No reload on `online`: it would close open sheets and editors. Queries and queued
+            writes resume by themselves; only /~offline reloads (lib/offline/reconnect.ts). */}
+        <SerwistProvider swUrl="/sw.js" reloadOnOnline={false}>
           <Providers>{children}</Providers>
         </SerwistProvider>
       </body>
