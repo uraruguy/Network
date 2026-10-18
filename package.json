@@ -35,11 +35,11 @@
     "import:rollback": "tsx scripts/import/rollback.ts"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^4.0.56",
+    "@ai-sdk/anthropic": "^4.0.81",
     "@ai-sdk/react": "^4.0.147",
     "@base-ui/react": "^1.9.0",
     "@modelcontextprotocol/server": "^2.3.1",
-    "@openrouter/ai-sdk-provider": "^3.0.0",
+    "@openrouter/ai-sdk-provider": "^3.1.0",
     "@serwist/next": "^9.5.13",
     "@simplewebauthn/browser": "^14.0.0",
     "@simplewebauthn/server": "^14.0.3",
