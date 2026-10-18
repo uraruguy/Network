@@ -222,7 +222,7 @@ function CodeBlock({ code, label }: { code: string; label: string }) {
   );
 }
 
-const claudeCodeCommand = (url: string, token: string) => `claude mcp add --transport http network ${url} \\\n  --header "Authorization: Bearer ${token}"`;
+const claudeCodeCommand = (url: string, token: string) => `claude mcp add --transport http --scope user network ${url} \\\n  --header "Authorization: Bearer ${token}"`;
 const cursorConfig = (url: string, token: string) =>
   JSON.stringify({ mcpServers: { network: { url, headers: { Authorization: `Bearer ${token}` } } } }, null, 2);
 

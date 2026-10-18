@@ -18,6 +18,92 @@ The consent page won't approve an app that wants to come back to `localhost`, a 
 address or a custom app scheme (`cursor://…`); it points you to a personal access token instead.
 [Why](#how-oauth-access-is-protected).
 
+## Production checklist
+
+Written for `https://jakob-network.vercel.app`; substitute your own URL when self-hosting. Steps 1–3
+are only needed for OAuth apps (claude.ai, ChatGPT); personal access tokens (step 5) work as soon as
+the app is deployed.
+
+**1. The deployment is ready.** Both of these should hold (no Supabase changes needed yet):
+
+```bash
+curl -s https://jakob-network.vercel.app/.well-known/oauth-protected-resource/api/mcp
+```
+
+- [ ] `"resource"` is `https://jakob-network.vercel.app/api/mcp` and `"authorization_servers"` is
+      `["https://<project-ref>.supabase.co/auth/v1"]`. If `resource` shows another host, set
+      `NEXT_PUBLIC_APP_URL=https://jakob-network.vercel.app` in Vercel (Production) and redeploy.
+- [ ] There is **no** `scopes_supported` field. Older builds listed `network:read network:write`
+      there; clients copy that into the sign-in request and Supabase rejects it with
+      `unsupported scope: network:read`.
+
+**2. Supabase Dashboard → your project → Authentication**
+
+- [ ] **URL Configuration:** Site URL is `https://jakob-network.vercel.app` (Supabase builds the
+      consent URL from it), and Redirect URLs include `https://jakob-network.vercel.app/auth/callback`.
+- [ ] **JWT Keys:** the *current* signing key is asymmetric (ECC P-256 or RSA), not *Legacy HS256
+      (shared secret)*. If it is legacy: create a standby ECC key, then **Rotate keys**. Sessions
+      signed with the old secret stay valid until you revoke it. This is required: Supabase can't
+      sign the ID token for a client that asks for `openid` with HS256, so its token exchange would
+      fail. It also lets `/api/mcp` verify tokens without a round trip to Supabase.
+- [ ] **OAuth Server:** turn the OAuth 2.1 server **on**, set **Authorization Path** to
+      `/oauth/consent`, turn on **Allow Dynamic OAuth Apps** (dynamic client registration: claude.ai
+      and ChatGPT register themselves), and save.
+- [ ] Check: this command prints a URL ending in `/auth/v1/oauth/clients/register`. A `502` with
+      `"unavailable"` means the OAuth server is still off.
+
+  ```bash
+  curl -s https://jakob-network.vercel.app/.well-known/oauth-authorization-server | grep -o '"registration_endpoint":"[^"]*"'
+  ```
+
+**3. claude.ai custom connector** (also appears in the Claude desktop and mobile apps)
+
+- [ ] claude.ai → Settings → Connectors → **Add custom connector**. Name `The Network`, URL
+      `https://jakob-network.vercel.app/api/mcp`. Leave the advanced OAuth client ID/secret empty.
+- [ ] **Connect** → The Network opens → sign in (password + Face ID) → *Claude wants to connect to
+      your network* → **Read only** (or **Read & write**) → **Allow** → you land back on claude.ai,
+      connected.
+- [ ] In a chat, enable The Network in the tools menu and ask *“What did I last discuss with Ana?”*
+- [ ] The Network → Settings → Connected apps lists it under *Apps signed in with your account*.
+
+If something goes wrong:
+
+| You see | Meaning |
+| --- | --- |
+| `unsupported scope: network:read` | Step 1 isn't true yet (or claude.ai cached the old metadata, for up to an hour). |
+| claude.ai: *authorization server metadata* / registration errors | Step 2's OAuth server or dynamic registration toggle is off. |
+| *Request expired* on The Network | Supabase authorizations last a few minutes: press Connect again. |
+| *Reconnect claude.ai?* | You approved it before. Press **Continue** only if you just pressed Connect. |
+| Connected, but every tool call fails with 401 | Vercel logs: `[mcp] refused an OAuth session without a passkey-verified approval` means the token was minted more than 10 minutes after the approval, or the app was disconnected since. Disconnect it on claude.ai and connect again. |
+
+**4. ChatGPT** (optional): Settings → Apps & Connectors → Advanced → **Developer mode**, then add a
+connector with the same URL and OAuth; the consent page is the same as for claude.ai.
+
+**5. Apps on your computer: personal access tokens.** One token per app and device, so each can be
+revoked on its own.
+
+- [ ] The Network → Settings → Connected apps → **New token** → name it (`Claude Code · MacBook`) →
+      Read only or Read & write → **Create**. The token is shown **once**; the dialog prints the
+      command below with it filled in.
+- [ ] **Claude Code** (`--scope user` makes it available in every project):
+
+  ```bash
+  claude mcp add --transport http --scope user network https://jakob-network.vercel.app/api/mcp --header "Authorization: Bearer ntk_…"
+  ```
+
+  `claude mcp list` should show `network … ✓ Connected`; inside a session, `/mcp` lists its tools.
+- [ ] **Cursor:** a second token, in `~/.cursor/mcp.json` ([below](#cursor)); Cursor Settings → MCP
+      shows `network` with a green dot.
+- [ ] **Anything else** (MCP Inspector, `mcp-remote`, agent frameworks): the same header. Smoke test:
+
+  ```bash
+  npx @modelcontextprotocol/inspector --cli --server-url https://jakob-network.vercel.app/api/mcp --header "Authorization: Bearer ntk_…" --method tools/list
+  ```
+
+Claude Code, Cursor and the Inspector can also do OAuth, but they receive the code on `localhost`,
+which the consent page refuses in production — anyone with the password could pose as an app on
+your computer. Tokens are created behind password + passkey instead.
+
 ## Access levels (scopes)
 
 | Access | Scopes | Can |
@@ -46,11 +132,12 @@ you approved before asks to connect again, The Network shows **Reconnect claude.
 ## Claude Code
 
 ```bash
-claude mcp add --transport http network https://<your-network>/api/mcp \
+claude mcp add --transport http --scope user network https://<your-network>/api/mcp \
   --header "Authorization: Bearer ntk_…"
 ```
 
-The New token dialog prints this command with your token filled in.
+The New token dialog prints this command with your token filled in. `--scope user` makes the server
+available in every project; leave it out to add it to the current project only.
 
 ## Cursor
 
@@ -104,9 +191,10 @@ an approved app":
 1. **Only after a passkey-verified approval.** Every Allow on the consent page, and every
    **Continue** on its *Reconnect* screen, is recorded in the audit log (the page needs password +
    passkey). Supabase stamps each token with the time its session was created (the
-   `oauth_provider/authorization_code` entry of the `amr` claim, kept across refreshes); a token
-   is honoured only if an approval for that app (or a Continue) happened within the 10 minutes
-   before, and the app wasn't disconnected since. Tokens without that claim are refused.
+   `oauth_provider/authorization_code` entry of the `amr` claim: the code-exchange time in whole
+   seconds, unchanged by refreshes — checked against Supabase Auth v2.196); a token is honoured only
+   if an approval for that app (or a Continue) happened within the 10 minutes before, and the app
+   wasn't disconnected since. Tokens without that claim are refused.
 2. **Only to public https hosts.** The consent page sends codes only to `https://` redirect URIs
    on public hosts, never to loopback, private-network or custom-scheme destinations — those are
    apps on a computer, usually without a client secret, and they connect with personal access
@@ -123,32 +211,37 @@ registered URIs (that needs the service-role admin API, which the app doesn't ho
 access tokens are unaffected: they are created behind password + passkey and never go through
 Supabase.
 
-## Self-hosting: enabling OAuth
+## Enabling OAuth
 
-Tokens work out of the box. For OAuth (claude.ai, ChatGPT) the Supabase OAuth 2.1 server must be on:
-
-1. Supabase Dashboard → **Authentication → OAuth Server**: enable it, set the **authorization
-   path** to `/oauth/consent`, and the **Site URL** (Authentication → URL Configuration) to your
-   app's public URL.
-2. Let MCP clients register themselves: enable **dynamic client registration** (claude.ai and
-   ChatGPT use it). Alternatively create an OAuth app by hand (redirect URI from the client, e.g.
-   `https://claude.ai/api/mcp/auth_callback`) and paste its client ID/secret into the client's
-   advanced connector settings.
-3. Use asymmetric JWT signing keys (Authentication → JWT Keys), so access tokens are verified
-   locally without a round trip to Supabase.
-4. Set `NEXT_PUBLIC_APP_URL` to the public `https://` URL (it is the OAuth resource identifier).
+Tokens work out of the box. For OAuth (claude.ai, ChatGPT) the Supabase OAuth 2.1 server must be on —
+steps 1–2 of the [production checklist](#production-checklist). Instead of dynamic registration you
+can create an OAuth app by hand (Authentication → OAuth Apps; redirect URI from the client, e.g.
+`https://claude.ai/api/mcp/auth_callback`) and paste its client ID/secret into the client's
+advanced connector settings.
 
 The server publishes `/.well-known/oauth-protected-resource` (RFC 9728) pointing at
 `<SUPABASE_URL>/auth/v1`, and mirrors Supabase's authorization-server metadata at
-`/.well-known/oauth-authorization-server` for older clients.
+`/.well-known/oauth-authorization-server` for older clients. It deliberately advertises no
+`scopes_supported`: Supabase only issues its own scopes (`openid`, `email`, `profile`, `phone`,
+`offline_access`) and refuses others, and the access level comes from the consent page anyway.
 
 ## Testing locally
 
 Tokens work against `pnpm dev` as is. The local Supabase (`supabase/config.toml`) also runs the OAuth
-server with dynamic client registration and `/oauth/consent` as the authorization path, so the OAuth
-flow can be tried with a local MCP client such as the MCP Inspector (`npx @modelcontextprotocol/inspector`);
-loopback redirect URIs are accepted only because the app itself runs on `localhost`.
-Hosted clients like claude.ai can't reach `localhost`.
+server with dynamic client registration and `/oauth/consent` as the authorization path, so the whole
+OAuth flow can be tried with the MCP Inspector; loopback redirect URIs are accepted only because the
+app itself runs on `localhost`. Hosted clients like claude.ai can't reach `localhost`.
+
+1. Check the OAuth server is on: `curl -s http://127.0.0.1:54321/auth/v1/.well-known/oauth-authorization-server`.
+   `"OAuth server is disabled"` means the stack was started before `[auth.oauth_server]` existed:
+   `supabase stop && supabase start` (data is kept).
+2. In a terminal (the CLI needs a TTY to print the sign-in link), run
+   `npx @modelcontextprotocol/inspector --cli --server-url http://localhost:3100/api/mcp --method tools/list`.
+   It registers itself, prints a `…/auth/v1/oauth/authorize?…` link and waits on
+   `http://127.0.0.1:6276/oauth/callback`.
+3. Open the link in a browser signed in to `http://localhost:3100` (password, plus the passkey unless
+   `AUTH_REQUIRE_PASSKEY=false`), choose the access level and Allow. The CLI prints the tools; later
+   calls reuse the stored token (`--method tools/call --tool-name list_taxonomy`); `--relogin` starts over.
 
 ```bash
 # create a token while signed in (or use Settings → Connected apps)
