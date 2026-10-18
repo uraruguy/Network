@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { memo, type CSSProperties } from "react";
 import { Avatar } from "@/components/glass/Avatar";
+import { AvatarTransition, NAV_FORWARD } from "@/components/shell/transitions";
 import { RelativeTime } from "@/components/ui/RelativeTime";
 import { useNow } from "@/lib/clock";
 import type { PeopleRow } from "@/lib/filters/people-filters";
@@ -77,7 +78,7 @@ export const PersonRow = memo(function PersonRow({ p, emojiById, detail = "last"
     <Link
       href={href}
       prefetch={false}
-      transitionTypes={["nav-forward"]}
+      transitionTypes={NAV_FORWARD}
       onPointerEnter={prefetch}
       onFocus={prefetch}
       onTouchStart={prefetch}
@@ -92,8 +93,10 @@ export const PersonRow = memo(function PersonRow({ p, emojiById, detail = "last"
         className,
       )}
     >
-      <span className="shrink-0" style={{ viewTransitionName: `avatar-${p.id}` }}>
-        <Avatar name={p.displayName} src={p.avatarUrl} size={44} />
+      <span className="shrink-0">
+        <AvatarTransition personId={p.id}>
+          <Avatar name={p.displayName} src={p.avatarUrl} size={44} />
+        </AvatarTransition>
       </span>
       <span className="flex min-w-0 flex-1 flex-col justify-center">
         <span className="flex min-w-0 items-center gap-1.5">

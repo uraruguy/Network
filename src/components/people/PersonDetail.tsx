@@ -29,7 +29,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Avatar } from "@/components/glass/Avatar";
 import { Chip } from "@/components/glass/Chip";
 import { GlassButton } from "@/components/glass/GlassButton";
@@ -37,6 +37,7 @@ import { FollowUpSheet } from "@/components/followups/FollowUpSheet";
 import { QuickImportSheet } from "@/components/import/QuickImportSheet";
 import { PersonNotesSection } from "@/components/notes/PersonNotesSection";
 import { confirm } from "@/components/ui/confirm";
+import { AvatarTransition } from "@/components/shell/transitions";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { formatBirthday, parseBirthday } from "@/components/ui/date/BirthdayPicker";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -208,9 +209,12 @@ export function PersonDetail({ id }: { id: string }) {
 
       {/* Header */}
       <header className="flex flex-col items-center px-2 pt-2 pb-5 text-center">
-        <span className="rounded-full elevation-e2" style={{ viewTransitionName: `avatar-${id}` } as CSSProperties}>
-          <Avatar name={name} src={head.avatarUrl} size={104} />
-        </span>
+        {/* Rendered from the cached index row (see `head`), so the list avatar can morph into it. */}
+        <AvatarTransition personId={id}>
+          <span className="rounded-full elevation-e2">
+            <Avatar name={name} src={head.avatarUrl} size={104} />
+          </span>
+        </AvatarTransition>
         <h1 ref={nameRef} className="mt-3.5 max-w-full text-title1 text-balance text-fg">
           {name}
         </h1>
