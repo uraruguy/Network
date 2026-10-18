@@ -81,7 +81,7 @@ DATABASE_URL='<session or direct connection string>' pnpm db:seed-cities
 - **URL Configuration:** Site URL = your app URL; add `https://<your-app>/auth/callback` to the
   redirect URLs (password reset).
 - **JWT Keys:** asymmetric signing keys (sessions are then verified without a round trip).
-- **OAuth Server** (only for claude.ai / ChatGPT connectors): see [docs/mcp.md](docs/mcp.md#self-hosting-enabling-oauth).
+- **OAuth Server** (only for claude.ai / ChatGPT connectors): see [docs/mcp.md](docs/mcp.md#production-checklist).
 
 **3. Vercel.** Import the repo (framework: Next.js) and set these environment variables:
 
@@ -163,12 +163,12 @@ people and follow-ups. Full guide: [docs/mcp.md](docs/mcp.md).
 
 - **Claude Code:** Settings → Connected apps → *New token* (shown once), then
   ```bash
-  claude mcp add --transport http network https://<your-app>/api/mcp \
+  claude mcp add --transport http --scope user network https://<your-app>/api/mcp \
     --header "Authorization: Bearer ntk_…"
   ```
 - **claude.ai** (web, desktop, mobile): Settings → Connectors → *Add custom connector* → your server
   URL → sign in with password + passkey → choose *Read only* or *Read & write* → *Allow*. Needs the
-  Supabase OAuth server ([setup](docs/mcp.md#self-hosting-enabling-oauth)).
+  Supabase OAuth server ([checklist](docs/mcp.md#production-checklist)).
 
 Revoke tokens and disconnect apps any time in Settings → Connected apps.
 
