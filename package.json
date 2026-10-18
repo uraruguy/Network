@@ -65,7 +65,7 @@
     "date-fns": "^4.4.0",
     "drizzle-orm": "^0.45.2",
     "idb-keyval": "^6.3.0",
-    "lucide-react": "^1.47.0",
+    "lucide-react": "^1.57.0",
     "maplibre-gl": "^6.14.0",
     "mcp-handler": "^2.3.0",
     "motion": "^13.4.0",
@@ -74,15 +74,15 @@
     "postgres": "^3.4.9",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "react-force-graph-2d": "^1.29.1",
+    "react-force-graph-2d": "^1.29.2",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
-    "resend": "^6.28.1",
+    "resend": "^6.33.0",
     "server-only": "^0.0.1",
     "serwist": "^9.5.13",
     "tailwind-merge": "^3.7.0",
     "turndown": "^7.2.4",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@serwist/cli": "^9.5.13",
