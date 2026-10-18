@@ -1,5 +1,5 @@
 "use client";
-import { Briefcase, Link2, MapPin, Merge, Pencil, Undo2, UserCheck, UserX, Users } from "lucide-react";
+import { Briefcase, Link2, Link2Off, MapPin, Merge, Pencil, Undo2, UserCheck, UserX, Users } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Avatar } from "@/components/glass/Avatar";
 import { Chip } from "@/components/glass/Chip";
@@ -49,6 +49,8 @@ export function ProposalCard({ proposal: p, verdict, verdictLabel, onRename, onT
   const facts = [p.profile.role, p.profile.company].filter(Boolean);
   const followUp = p.profile.followUps[0];
   const similar = p.similar.filter((s) => s.id !== p.matchPerson?.id).slice(0, 4);
+  // The person the commit would add to was deleted in The Network (the commit skips, never recreates).
+  const deletedName = p.committedPersonId ? (p.committedPersonDeleted ? p.displayName : null) : p.matchPerson?.deleted ? p.matchPerson.displayName : null;
 
   return (
     <article aria-label={p.displayName} className={cn(!bare && "surface rounded-xl p-4 sm:p-6", className)}>
@@ -96,13 +98,22 @@ export function ProposalCard({ proposal: p, verdict, verdictLabel, onRename, onT
         </div>
       </header>
 
-      {p.matchPerson && (
-        <p className="mt-3 flex items-center gap-2 rounded-md bg-accent-soft px-3 py-2 text-subhead text-accent-text">
-          <Link2 size={16} strokeWidth={2.2} className="shrink-0" aria-hidden />
+      {deletedName ? (
+        <p className="mt-3 flex items-center gap-2 rounded-md bg-warning-soft px-3 py-2 text-subhead text-fg">
+          <Link2Off size={16} strokeWidth={2.2} className="shrink-0 text-warning" aria-hidden />
           <span>
-            Adds to <strong className="font-semibold">{p.matchPerson.displayName}</strong>, already in The Network
+            <strong className="font-semibold">{deletedName}</strong> was deleted from The Network — restore them there to import this person
           </span>
         </p>
+      ) : (
+        p.matchPerson && (
+          <p className="mt-3 flex items-center gap-2 rounded-md bg-accent-soft px-3 py-2 text-subhead text-accent-text">
+            <Link2 size={16} strokeWidth={2.2} className="shrink-0" aria-hidden />
+            <span>
+              Adds to <strong className="font-semibold">{p.matchPerson.displayName}</strong>, already in The Network
+            </span>
+          </p>
+        )
       )}
 
       {flags.length > 0 && (

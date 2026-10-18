@@ -4,15 +4,17 @@
  * Phase 1 — one savepoint per approved person: target = merged_into chain → match_person_id →
  *   existing person with source_ref 'import-person:<id>' → create. FILL BLANKS ONLY on existing
  *   people; arrays unioned; categories by slug; activities/tags find-or-create; one pinned
- *   "From Apple Notes — key facts" note (key facts + open threads); at most one imported reminder.
+ *   "From Apple Notes — key facts" note per person (key facts + open threads); at most one imported
+ *   reminder per person. A target person the user deleted is skipped, never recreated.
  * Phase 2 — one savepoint per note: the verbatim note filed under its primary person (or excerpt
  *   notes for list/journal notes), note_mentions for the other committed people, item → committed.
- * Phase 3 — introducedBy links between committed people.
+ *   A note the user deleted stays deleted; one they edited in the app keeps their version.
+ * Phase 3 — introducedBy links between all committed people (across commits, merge chains followed).
  * Every insert/update is written to import_commit_log (with the previous values) so a commit can
  * be rolled back exactly. A dry run executes everything in one transaction and rolls it back.
  */
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, isNull, lt, or, sql, type SQL } from "drizzle-orm";
 import { schema } from "@/lib/db";
 import { activities, importCommitLog, importItemsX, importMentions, importPeople, personActivities, remindersX, type ImportPerson } from "@/lib/db/schema-import";
 import { HOBBIES, type Warmth } from "@/lib/constants";
@@ -21,7 +23,9 @@ import { fromIsoDay, noteDate } from "@/lib/import/dates";
 import { createGeocoder, type CityHit, type Geocoder } from "@/lib/import/geo";
 import { normalizeExtraction } from "@/lib/import/mentions";
 import { readProfile } from "@/lib/import/profile";
-import { openThreadsMarkdown, planReminders, type OpenThread, type PersonPlan } from "@/lib/import/reminders-policy";
+import { introductionLinks } from "@/lib/import/introductions";
+import { openThreadsMarkdown, planReminders, SPREAD_DAYS, type OpenThread, type PersonPlan } from "@/lib/import/reminders-policy";
+import { rollbackBlockers, type BlockerRef } from "@/lib/import/rollback-guard";
 import { finalProposalResolver } from "./import-resolve";
 import { eachLimit } from "@/lib/each-limit";
 import { ImportError, inTransaction, type DbOrTx, type Tx } from "./import-shared";
@@ -37,15 +41,21 @@ export const factsSourceRef = (key: string) => `apple-notes:facts:${key}`;
  * Where rows written by a commit say they came from. Apple Notes keeps its historical values; other
  * sources (e.g. "paste" from the quick import) use the source name, and — because every paste makes
  * fresh proposal keys — key their facts note by the target person, so repeated pastes about the same
- * person extend one pinned note instead of stacking new ones.
+ * person extend one pinned note instead of stacking new ones. Facts notes are also found per person
+ * by `factsPrefix`, so two proposals approved into one person share a single facts note.
+ * `oneReminderEver`: Apple Notes adds at most one imported reminder per person, ever; pastes may add a
+ * new one once the person's earlier imported reminder is done.
  */
 export function sourceMeta(source: string) {
-  if (source === SOURCE_KIND) return { kind: SOURCE_KIND, factsTitle: FACTS_TITLE, factsRef: (key: string, _personId: string) => factsSourceRef(key) };
-  return { kind: source, factsTitle: "Key facts", factsRef: (_key: string, personId: string) => `${source}:facts:${personId}` };
+  if (source === SOURCE_KIND) {
+    return { kind: SOURCE_KIND, factsTitle: FACTS_TITLE, factsPrefix: factsSourceRef(""), factsRef: (key: string, _personId: string) => factsSourceRef(key), oneReminderEver: true };
+  }
+  return { kind: source, factsTitle: "Key facts", factsPrefix: `${source}:facts:`, factsRef: (_key: string, personId: string) => `${source}:facts:${personId}`, oneReminderEver: false };
 }
 export const excerptSourceRef = (externalId: string, key: string) => `${externalId}#${key}`;
 
 const DAY = 86_400_000;
+const OPEN_REMINDER = ["pending", "sent", "snoozed"] as const;
 type StoredNames = { firstName?: string | null; lastName?: string | null };
 
 /* ------------------------------------------------------------------ */
@@ -116,11 +126,65 @@ type Ctx = {
   plans: Map<string, PersonPlan>;
   warnings: string[];
   meta: ReturnType<typeof sourceMeta>;
+  /** Imported notes the user changed in the app since the import last wrote them: never overwritten. */
+  editedNotes: Set<string>;
+  /** People the user deleted: no notes are filed under them and they are never recreated. */
+  deletedPeople: Set<string>;
 };
 
 async function tableExists(tx: Tx, name: string) {
   const r = (await tx.execute(sql`select to_regclass(${name}) is not null as ok`)) as unknown as { ok: boolean }[];
   return !!r[0]?.ok;
+}
+
+/**
+ * Imported notes edited in the app since the import last wrote them: the editor saved content_json
+ * (the import never does), or updated_at is later than the newest logged import write of the note.
+ * Notes from before the commit log count their creation as that write. (A rolled-back update also
+ * bumps updated_at, so such a note counts as edited: the safe side.)
+ */
+async function loadEditedNotes(tx: Tx, ownerId: string, kind: string) {
+  const rows = (await tx.execute(sql`
+    select n.id from notes n
+    left join (
+      select row_key->>'id' as id, max(created_at) as at from import_commit_log
+      where owner_id = ${ownerId} and table_name = 'notes' group by 1
+    ) w on w.id = n.id::text
+    where n.owner_id = ${ownerId} and n.source_kind = ${kind} and n.deleted_at is null
+      and (n.content_json is not null or n.updated_at > coalesce(w.at, n.created_at))`)) as unknown as { id: string }[];
+  return new Set(rows.map((r) => r.id));
+}
+
+async function loadDeletedPeople(tx: Tx, ownerId: string) {
+  const rows = await tx.select({ id: people.id }).from(people).where(and(eq(people.ownerId, ownerId), isNotNull(people.deletedAt)));
+  return new Set(rows.map((r) => r.id));
+}
+
+/**
+ * Reminder state before planning: due dates of pending imported reminders (they count toward the
+ * ≤3/day spread, so chunked and repeated commits don't pile up on one day) and which proposals
+ * already have an imported reminder (by their key, or on their known target person).
+ */
+async function reminderState(tx: Tx, ownerId: string, meta: ReturnType<typeof sourceMeta>, toCommit: ImportPerson[], now: Date) {
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const taken = await tx
+    .select({ dueAt: remindersX.dueAt })
+    .from(remindersX)
+    .where(and(eq(remindersX.ownerId, ownerId), eq(remindersX.sourceKind, meta.kind), inArray(remindersX.status, OPEN_REMINDER), gte(remindersX.dueAt, new Date(today + DAY)), lt(remindersX.dueAt, new Date(today + (SPREAD_DAYS + 1) * DAY))));
+  const keys = toCommit.map((p) => p.key);
+  const targets = [...new Set(toCommit.flatMap((p) => [p.committedPersonId, p.matchPersonId]).filter((x): x is string => !!x))];
+  const have = keys.length
+    ? await tx
+        .select({ ref: remindersX.sourceRef, personId: remindersX.personId, status: remindersX.status })
+        .from(remindersX)
+        .where(and(eq(remindersX.ownerId, ownerId), eq(remindersX.sourceKind, meta.kind), or(inArray(remindersX.sourceRef, keys), targets.length ? inArray(remindersX.personId, targets) : undefined)))
+    : [];
+  const refs = new Set(have.map((r) => r.ref));
+  const persons = new Set(have.filter((r) => meta.oneReminderEver || (OPEN_REMINDER as readonly string[]).includes(r.status)).map((r) => r.personId));
+  return {
+    taken: taken.map((r) => r.dueAt),
+    has: (p: ImportPerson) => refs.has(p.key) || [p.committedPersonId, p.matchPersonId].some((id) => !!id && persons.has(id)),
+  };
 }
 
 function slugify(s: string) {
@@ -194,32 +258,92 @@ function mergeFactsMd(existing: string, next: string) {
   return add.length ? `${existing.trimEnd()}\n${add.join("\n")}` : existing;
 }
 
-export type PersonResult = { proposalId: string; key: string; personId: string; action: "created" | "updated" | "unchanged" };
+export type PersonResult = { proposalId: string; key: string; personId: string; action: "created" | "updated" | "unchanged"; reminder: boolean };
+export type PersonSkip = { proposalId: string; key: string; action: "skipped"; name: string; reason: string };
 
-async function commitPerson(tx: Tx, ctx: Ctx, log: CommitLog, p: ImportPerson): Promise<PersonResult> {
+type FactsInput = { personId: string; key: string; name: string; md: string; first: Date };
+
+/**
+ * One pinned facts note per person: found by this proposal's ref or by the person (prefix), so two
+ * proposals approved into the same person share it. A facts note the user deleted stays deleted;
+ * one they edited in the app is left alone (the editor shows content_json, so merging Markdown under
+ * it would only desync search). Both cases become warnings.
+ */
+async function writeFactsNote(tx: Tx, ctx: Ctx, log: CommitLog, lc: { personId: string }, f: FactsInput) {
+  const ref = ctx.meta.factsRef(f.key, f.personId);
+  const rows = await tx
+    .select({ id: notes.id, contentMd: notes.contentMd, deletedAt: notes.deletedAt, sourceRef: notes.sourceRef })
+    .from(notes)
+    .where(and(eq(notes.ownerId, ctx.ownerId), eq(notes.sourceKind, ctx.meta.kind), or(eq(notes.sourceRef, ref), and(eq(notes.personId, f.personId), sql`starts_with(${notes.sourceRef}, ${ctx.meta.factsPrefix})`))))
+    .orderBy(notes.createdAt);
+  const live = rows.find((r) => !r.deletedAt && r.sourceRef === ref) ?? rows.find((r) => !r.deletedAt);
+  if (live) {
+    const merged = mergeFactsMd(live.contentMd, f.md);
+    if (merged === live.contentMd) return;
+    if (ctx.editedNotes.has(live.id)) return void ctx.warnings.push(`${f.name}: you edited the key facts note in The Network — new facts not merged`);
+    await loggedUpdate(tx, log, "notes", live.id, { contentMd: merged, contentText: mdToText(merged) }, lc);
+    return;
+  }
+  if (rows.length) return void ctx.warnings.push(`${f.name}: you deleted the key facts note — not recreated`);
+  const [n] = await tx
+    .insert(notes)
+    .values({ ownerId: ctx.ownerId, personId: f.personId, title: ctx.meta.factsTitle, contentMd: f.md, contentText: mdToText(f.md), kind: "note", occurredAt: f.first, pinned: true, sourceKind: ctx.meta.kind, sourceRef: ref })
+    .returning({ id: notes.id });
+  await log.insert("notes", { id: n!.id }, lc);
+}
+
+/**
+ * At most one imported reminder per person: this proposal already made one (any status — re-runs
+ * never repeat it), or the person has one from this source (any status for Apple Notes, open ones for
+ * sources that keep adding follow-ups such as pastes). Covers two proposals resolving to one person.
+ */
+async function hasImportedReminder(tx: Tx, ctx: Ctx, personId: string, key: string) {
+  const [r] = await tx
+    .select({ id: remindersX.id })
+    .from(remindersX)
+    .where(
+      and(
+        eq(remindersX.ownerId, ctx.ownerId),
+        eq(remindersX.sourceKind, ctx.meta.kind),
+        or(eq(remindersX.sourceRef, key), and(eq(remindersX.personId, personId), ctx.meta.oneReminderEver ? undefined : inArray(remindersX.status, OPEN_REMINDER))),
+      ),
+    )
+    .limit(1);
+  return !!r;
+}
+
+async function commitPerson(tx: Tx, ctx: Ctx, log: CommitLog, p: ImportPerson): Promise<PersonResult | PersonSkip> {
   // Lock the proposal; a concurrent commit of the same person waits here.
   const [locked] = await tx.select().from(importPeople).where(eq(importPeople.id, p.id)).for("update");
   if (!locked || locked.status !== "approved") throw new Error(`proposal ${p.key} is ${locked?.status ?? "gone"}`);
   const prof = readProfile(locked.profile);
   const names = locked.profile as StoredNames;
   const lc = { personId: locked.id };
+  const skip = (name: string): PersonSkip => ({ proposalId: locked.id, key: locked.key, action: "skipped", name, reason: `${name} was deleted in The Network — restore them there to import more` });
 
-  // Target person.
+  // Target person. One the user deleted is respected: skipped, never recreated as a duplicate. The
+  // row lock serialises concurrent commits of two proposals for one person (one facts note, one reminder).
   let personId: string | null = null;
   for (const candidate of [locked.committedPersonId, locked.matchPersonId]) {
     if (!candidate) continue;
-    const r = await tx.select({ id: people.id }).from(people).where(and(eq(people.id, candidate), eq(people.ownerId, ctx.ownerId), isNull(people.deletedAt)));
-    if (r[0]) {
-      personId = r[0].id;
-      break;
-    }
+    const [r] = await tx
+      .select({ id: people.id, displayName: people.displayName, deletedAt: people.deletedAt })
+      .from(people)
+      .where(and(eq(people.id, candidate), eq(people.ownerId, ctx.ownerId)))
+      .for("update");
+    if (!r) continue;
+    if (r.deletedAt) return skip(r.displayName);
+    personId = r.id;
+    break;
   }
   if (!personId) {
-    const r = await tx
-      .select({ id: people.id })
+    const rows = await tx
+      .select({ id: people.id, displayName: people.displayName, deletedAt: people.deletedAt })
       .from(people)
-      .where(and(eq(people.ownerId, ctx.ownerId), eq(people.sourceRef, personSourceRef(locked.id)), isNull(people.deletedAt)));
-    personId = r[0]?.id ?? null;
+      .where(and(eq(people.ownerId, ctx.ownerId), eq(people.sourceRef, personSourceRef(locked.id))));
+    const live = rows.find((r) => !r.deletedAt);
+    if (!live && rows[0]) return skip(rows[0].displayName);
+    personId = live?.id ?? null;
   }
 
   const home = await findOrCreateLocation(tx, ctx, log, await ctx.geo(prof.city, prof.country), locked.id);
@@ -319,46 +443,30 @@ async function commitPerson(tx: Tx, ctx: Ctx, log: CommitLog, p: ImportPerson): 
     if (ins.length) await log.insert("person_tags", { person_id: personId, tag_id: tid! }, lc);
   }
 
-  // Key facts + open threads → one pinned note.
+  // At most one imported reminder per person; one that can't be created joins the open threads.
   const plan = ctx.plans.get(locked.key) ?? { reminder: null, openThreads: [] };
-  const md = factsMarkdown(prof.keyFacts, plan.openThreads, { howICanHelp: prof.howICanHelp, whatICanAsk: prof.whatICanAsk });
-  if (md) {
-    const ref = ctx.meta.factsRef(locked.key, personId);
-    const [existing] = await tx
-      .select({ id: notes.id, contentMd: notes.contentMd })
-      .from(notes)
-      .where(and(eq(notes.ownerId, ctx.ownerId), eq(notes.sourceKind, ctx.meta.kind), eq(notes.sourceRef, ref), isNull(notes.deletedAt)));
-    if (existing) {
-      const merged = mergeFactsMd(existing.contentMd, md);
-      if (merged !== existing.contentMd) await loggedUpdate(tx, log, "notes", existing.id, { contentMd: merged, contentText: mdToText(merged) }, lc);
-    } else {
-      const first = fromIsoDay(prof.firstSeen) ?? fromIsoDay(prof.lastSeen) ?? ctx.now;
-      const [n] = await tx
-        .insert(notes)
-        .values({ ownerId: ctx.ownerId, personId, title: ctx.meta.factsTitle, contentMd: md, contentText: mdToText(md), kind: "note", occurredAt: first, pinned: true, sourceKind: ctx.meta.kind, sourceRef: ref })
-        .returning({ id: notes.id });
-      await log.insert("notes", { id: n!.id }, lc);
-    }
+  let reminder = plan.reminder;
+  let threads = plan.openThreads;
+  if (reminder && (await hasImportedReminder(tx, ctx, personId, locked.key))) {
+    threads = [...threads, ...reminder.threads];
+    reminder = null;
   }
 
-  // At most one imported reminder per person.
-  if (plan.reminder) {
-    const [have] = await tx
-      .select({ id: remindersX.id })
-      .from(remindersX)
-      .where(and(eq(remindersX.ownerId, ctx.ownerId), eq(remindersX.sourceKind, ctx.meta.kind), eq(remindersX.sourceRef, locked.key)));
-    if (!have) {
-      const [r] = await tx
-        .insert(remindersX)
-        .values({ ownerId: ctx.ownerId, personId, dueAt: plan.reminder.dueAt, message: plan.reminder.message, recurrence: "none", sourceKind: ctx.meta.kind, sourceRef: locked.key })
-        .returning({ id: remindersX.id });
-      await log.insert("reminders", { id: r!.id }, lc);
-      await syncNextFollowup(tx, personId);
-    }
+  // Key facts + open threads → the person's pinned facts note.
+  const md = factsMarkdown(prof.keyFacts, threads, { howICanHelp: prof.howICanHelp, whatICanAsk: prof.whatICanAsk });
+  if (md) await writeFactsNote(tx, ctx, log, lc, { personId, key: locked.key, name: locked.displayName, md, first: fromIsoDay(prof.firstSeen) ?? fromIsoDay(prof.lastSeen) ?? ctx.now });
+
+  if (reminder) {
+    const [r] = await tx
+      .insert(remindersX)
+      .values({ ownerId: ctx.ownerId, personId, dueAt: reminder.dueAt, message: reminder.message, recurrence: "none", sourceKind: ctx.meta.kind, sourceRef: locked.key })
+      .returning({ id: remindersX.id });
+    await log.insert("reminders", { id: r!.id }, lc);
+    await syncNextFollowup(tx, personId);
   }
 
   await loggedUpdate(tx, log, "import_people", locked.id, { status: "committed", committedPersonId: personId }, lc);
-  return { proposalId: locked.id, key: locked.key, personId, action };
+  return { proposalId: locked.id, key: locked.key, personId, action, reminder: !!reminder };
 }
 
 async function syncNextFollowup(tx: Tx, personId: string) {
@@ -366,6 +474,39 @@ async function syncNextFollowup(tx: Tx, personId: string) {
     update people set next_followup_at = (
       select min(due_at) from reminders where person_id = ${personId} and status in ('pending', 'sent', 'snoozed')
     ) where id = ${personId}`);
+}
+
+/**
+ * Phase 3: introducedBy between every committed proposal and its introducer, wherever either was
+ * committed (chunked or resumable commits put them in different runs) and through merge chains.
+ * Fills blanks only, skips deleted people, and never re-sets a link an earlier commit made that the
+ * user cleared since.
+ */
+async function linkIntroductions(db: Tx, ctx: Ctx, log: CommitLog, props: ImportPerson[]) {
+  const links = introductionLinks(props.map((p) => ({ id: p.id, key: p.key, status: p.status, mergedIntoId: p.mergedIntoId, committedPersonId: p.committedPersonId, introducedByKey: readProfile(p.profile).introducedByKey })));
+  if (!links.length) return 0;
+  const ids = [...new Set(links.flatMap((l) => [l.personId, l.introducerId]))];
+  const rows = await db
+    .select({ id: people.id, introducedById: people.introducedById, deletedAt: people.deletedAt })
+    .from(people)
+    .where(and(eq(people.ownerId, ctx.ownerId), inArray(people.id, ids)));
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const cleared = new Set(
+    (
+      (await db.execute(sql`
+        select distinct row_key->>'id' as id from import_commit_log
+        where owner_id = ${ctx.ownerId} and table_name = 'people' and op = 'update' and before -> 'introduced_by_id' is not null`)) as unknown as { id: string }[]
+    ).map((r) => r.id),
+  );
+  let n = 0;
+  for (const l of links) {
+    const person = byId.get(l.personId);
+    const intro = byId.get(l.introducerId);
+    if (!person || !intro || person.deletedAt || intro.deletedAt || person.introducedById || cleared.has(l.personId)) continue;
+    await loggedUpdate(db, log, "people", l.personId, { introducedById: l.introducerId }, { personId: l.proposalId });
+    n++;
+  }
+  return n;
 }
 
 /* ------------------------------------------------------------------ */
@@ -386,13 +527,28 @@ type NoteItem = {
   extractionVersion: number | null;
 };
 
-export type NoteResult = { itemId: string; action: "created" | "updated" | "unchanged" | "excerpts" | "waiting"; noteId: string | null; excerpts: number; mentions: number; waitingOn: string[] };
+/**
+ * `kept`: the note was left alone for the user — they deleted it (or the person it belongs to), or
+ * edited it in the app since the import wrote it. `deleted` / `edited` count those notes (excerpt
+ * notes included).
+ */
+export type NoteResult = {
+  itemId: string;
+  action: "created" | "updated" | "unchanged" | "excerpts" | "waiting" | "kept";
+  noteId: string | null;
+  excerpts: number;
+  mentions: number;
+  deleted: number;
+  edited: number;
+  waitingOn: string[];
+};
 
 async function commitNote(tx: Tx, ctx: Ctx, log: CommitLog, it: NoteItem, props: ImportPerson[]): Promise<NoteResult> {
   const final = finalProposalResolver(props);
   const ms = await tx.select().from(importMentions).where(eq(importMentions.itemId, it.id));
-  const res: NoteResult = { itemId: it.id, action: "unchanged", noteId: it.noteId, excerpts: 0, mentions: 0, waitingOn: [] };
+  const res: NoteResult = { itemId: it.id, action: "unchanged", noteId: it.noteId, excerpts: 0, mentions: 0, deleted: 0, edited: 0, waitingOn: [] };
   const lc = { itemId: it.id };
+  const label = `“${it.title ?? "Note"}”`;
   const nd = ctx.itemDates.get(it.id)?.date ?? it.externalCreatedAt ?? ctx.now;
   const resolved = ms.map((m) => ({ m, p: final(m.importPersonId) }));
   const fileable = resolved.filter((r) => r.p && r.p.disposition === "person" && r.p.status !== "rejected");
@@ -408,26 +564,40 @@ async function commitNote(tx: Tx, ctx: Ctx, log: CommitLog, it: NoteItem, props:
       res.waitingOn.push(primary.p?.key ?? primary.m.surface);
       return res;
     }
+    if (ctx.deletedPeople.has(pid)) {
+      res.action = "kept";
+      res.deleted++;
+      ctx.warnings.push(`${label}: ${primary.p!.displayName} was deleted in The Network — note not filed`);
+      return res;
+    }
     const content = { title: it.title, contentMd: it.html ? htmlToMarkdown(it.html) : it.text, contentText: it.text, occurredAt: nd };
     let noteId: string | null = null;
     // Existing note: recorded on the item, or found by source ref (re-run after a partial commit).
-    for (const cand of [it.noteId]) {
-      if (!cand) continue;
-      const r = await tx.select({ id: notes.id }).from(notes).where(and(eq(notes.id, cand), isNull(notes.deletedAt)));
-      if (r[0]) noteId = r[0].id;
+    // Deleted ones count too: a note the user deleted stays deleted.
+    const found = await tx
+      .select({ id: notes.id, deletedAt: notes.deletedAt, title: notes.title, contentText: notes.contentText })
+      .from(notes)
+      .where(and(eq(notes.ownerId, ctx.ownerId), or(it.noteId ? eq(notes.id, it.noteId) : undefined, and(eq(notes.sourceKind, ctx.meta.kind), eq(notes.sourceRef, it.externalId)))));
+    const cur = found.find((n) => n.id === it.noteId && !n.deletedAt) ?? found.find((n) => !n.deletedAt);
+    if (!cur && found.length) {
+      const gone = found.find((n) => n.id === it.noteId) ?? found[0]!;
+      res.action = "kept";
+      res.deleted++;
+      res.noteId = gone.id;
+      await loggedUpdate(tx, log, "import_items", it.id, { status: it.status !== "committed" ? "committed" : undefined, noteId: it.noteId !== gone.id ? gone.id : undefined }, lc);
+      return res;
     }
-    if (!noteId) {
-      const r = await tx
-        .select({ id: notes.id })
-        .from(notes)
-        .where(and(eq(notes.ownerId, ctx.ownerId), eq(notes.sourceKind, ctx.meta.kind), eq(notes.sourceRef, it.externalId), isNull(notes.deletedAt)));
-      noteId = r[0]?.id ?? null;
-    }
-    if (noteId) {
-      const [cur] = await tx.select({ contentText: notes.contentText, title: notes.title }).from(notes).where(eq(notes.id, noteId));
-      if (cur!.contentText !== it.text || cur!.title !== it.title) {
-        await loggedUpdate(tx, log, "notes", noteId, content, lc);
-        res.action = "updated";
+    if (cur) {
+      noteId = cur.id;
+      if (cur.contentText !== it.text || cur.title !== it.title) {
+        if (ctx.editedNotes.has(cur.id)) {
+          res.action = "kept";
+          res.edited++;
+          ctx.warnings.push(`${label}: you edited it in The Network — kept your version`);
+        } else {
+          await loggedUpdate(tx, log, "notes", noteId, content, lc);
+          res.action = "updated";
+        }
       }
     } else {
       const [n] = await tx
@@ -449,8 +619,8 @@ async function commitNote(tx: Tx, ctx: Ctx, log: CommitLog, it: NoteItem, props:
       res.action = "created";
     }
     res.noteId = noteId;
-    // Everyone else in the note who is committed → mention.
-    const others = new Set(fileable.map((r) => committedId(r.p)).filter((x): x is string => !!x && x !== pid));
+    // Everyone else in the note who is committed (and not deleted) → mention.
+    const others = new Set(fileable.map((r) => committedId(r.p)).filter((x): x is string => !!x && x !== pid && !ctx.deletedPeople.has(x)));
     for (const other of others) {
       const ins = await tx.insert(noteMentions).values({ ownerId: ctx.ownerId, noteId, personId: other }).onConflictDoNothing().returning({ n: noteMentions.noteId });
       if (ins.length) {
@@ -477,18 +647,32 @@ async function commitNote(tx: Tx, ctx: Ctx, log: CommitLog, it: NoteItem, props:
         res.waitingOn.push(r.p.key);
         continue;
       }
+      if (ctx.deletedPeople.has(pid)) {
+        res.deleted++;
+        continue;
+      }
       const excerpt = r.m.excerpt ?? ex.candidates.find((c) => c.index === r.m.candidateIndex)?.excerpt ?? null;
       if (!excerpt || !it.text.includes(excerpt)) {
         ctx.warnings.push(`no verbatim excerpt for ${r.p.key} in “${it.title}”`);
         continue;
       }
+      // Same rules as whole notes: a deleted excerpt stays deleted, an edited one keeps the edit.
       const ref = excerptSourceRef(it.externalId, r.p.key);
-      const [have] = await tx
-        .select({ id: notes.id, contentText: notes.contentText })
+      const found = await tx
+        .select({ id: notes.id, contentText: notes.contentText, deletedAt: notes.deletedAt })
         .from(notes)
-        .where(and(eq(notes.ownerId, ctx.ownerId), eq(notes.sourceKind, ctx.meta.kind), eq(notes.sourceRef, ref), isNull(notes.deletedAt)));
+        .where(and(eq(notes.ownerId, ctx.ownerId), eq(notes.sourceKind, ctx.meta.kind), eq(notes.sourceRef, ref)));
+      const have = found.find((n) => !n.deletedAt);
       if (have) {
-        if (have.contentText !== excerpt) await loggedUpdate(tx, log, "notes", have.id, { contentMd: excerpt, contentText: excerpt, occurredAt: nd }, lc);
+        if (have.contentText === excerpt) continue;
+        if (ctx.editedNotes.has(have.id)) {
+          res.edited++;
+          ctx.warnings.push(`${label} (excerpt for ${r.p.displayName}): you edited it in The Network — kept your version`);
+        } else await loggedUpdate(tx, log, "notes", have.id, { contentMd: excerpt, contentText: excerpt, occurredAt: nd }, lc);
+        continue;
+      }
+      if (found.length) {
+        res.deleted++;
         continue;
       }
       const [n] = await tx
@@ -521,8 +705,10 @@ function failure(e: unknown): string {
 export type CommitReport = {
   commitId: string;
   dryRun: boolean;
-  people: { created: number; updated: number; unchanged: number; failed: { key: string; error: string }[]; results: PersonResult[] };
-  notes: { created: number; updated: number; unchanged: number; excerpts: number; mentions: number; waiting: number; partial: number; failed: { itemId: string; title: string | null; error: string }[] };
+  /** `skipped`: approved people whose person was deleted in The Network (never recreated). */
+  people: { created: number; updated: number; unchanged: number; failed: { key: string; error: string }[]; skipped: { key: string; name: string; reason: string }[]; results: PersonResult[] };
+  /** `deleted` / `edited`: notes left alone because the user deleted or edited them (see NoteResult). */
+  notes: { created: number; updated: number; unchanged: number; excerpts: number; mentions: number; waiting: number; partial: number; deleted: number; edited: number; failed: { itemId: string; title: string | null; error: string }[] };
   introductions: number;
   reminders: number;
   log: Record<string, number>;
@@ -564,8 +750,8 @@ export async function commitImport(
     const report: CommitReport = {
       commitId,
       dryRun: opts.dryRun,
-      people: { created: 0, updated: 0, unchanged: 0, failed: [], results: [] },
-      notes: { created: 0, updated: 0, unchanged: 0, excerpts: 0, mentions: 0, waiting: 0, partial: 0, failed: [] },
+      people: { created: 0, updated: 0, unchanged: 0, failed: [], skipped: [], results: [] },
+      notes: { created: 0, updated: 0, unchanged: 0, excerpts: 0, mentions: 0, waiting: 0, partial: 0, deleted: 0, edited: 0, failed: [] },
       introductions: 0,
       reminders: 0,
       log: {},
@@ -610,13 +796,16 @@ export async function commitImport(
     toCommit.sort((a, b) => a.key.localeCompare(b.key));
     if (opts.limit != null) toCommit = toCommit.slice(0, opts.limit);
 
-    // Reminder plan across everyone committed in this run (≤3/day spread is global).
+    // Reminder plan across everyone committed in this run; the ≤3/day spread also counts imported
+    // reminders already pending (earlier chunks and commits).
+    const rs = await reminderState(outer, ownerId, sourceMeta(opts.source), toCommit, now);
     const plans = planReminders(
       toCommit.map((p) => {
         const prof = readProfile(p.profile);
         return {
           key: p.key,
           createReminder: p.createReminder,
+          hasReminder: rs.has(p),
           followUps: prof.followUps.map((f) => {
             const d = f.sourceItemId ? itemDates.get(f.sourceItemId) : undefined;
             const fallback = fromIsoDay(prof.lastSeen) ?? now;
@@ -625,6 +814,7 @@ export async function commitImport(
         };
       }),
       now,
+      { taken: rs.taken },
     );
 
     const ctx: Ctx = {
@@ -642,6 +832,8 @@ export async function commitImport(
       plans,
       warnings: report.warnings,
       meta: sourceMeta(opts.source),
+      editedNotes: await loadEditedNotes(outer, ownerId, sourceMeta(opts.source).kind),
+      deletedPeople: await loadDeletedPeople(outer, ownerId),
     };
     if (!ctx.hasActivities) report.warnings.push("activities/person_activities tables not found — activities stored as legacy hobbies where they match");
 
@@ -652,9 +844,12 @@ export async function commitImport(
         let child: CommitLog | null = null;
         const r = await outer.transaction(async (tx) => commitPerson(tx, ctx, (child = log.with(tx)), p));
         log.absorb(child!);
-        report.people.results.push(r);
-        report.people[r.action]++;
-        if (plans.get(p.key)?.reminder) report.reminders++;
+        if (r.action === "skipped") report.people.skipped.push({ key: r.key, name: r.name, reason: r.reason });
+        else {
+          report.people.results.push(r);
+          report.people[r.action]++;
+          if (r.reminder) report.reminders++;
+        }
       } catch (e) {
         report.people.failed.push({ key: p.key, error: failure(e) });
       }
@@ -683,24 +878,15 @@ export async function commitImport(
         if (r.action !== "waiting" && r.waitingOn.length) report.notes.partial++;
         report.notes.excerpts += r.excerpts;
         report.notes.mentions += r.mentions;
+        report.notes.deleted += r.deleted;
+        report.notes.edited += r.edited;
       } catch (e) {
         report.notes.failed.push({ itemId: it.id, title: it.title, error: failure(e) });
       }
     }, (done) => opts.onProgress?.("notes", done, toFile.length));
 
-    // Phase 3: introducedBy among committed people (fill blank only).
-    const byKey = new Map(props.map((p) => [p.key, p]));
-    for (const r of report.people.results) {
-      const p = byKey.get(r.key);
-      const introKey = p ? readProfile(p.profile).introducedByKey : null;
-      const intro = introKey ? byKey.get(introKey) : undefined;
-      if (!intro?.committedPersonId || intro.committedPersonId === r.personId) continue;
-      const [cur] = await outer.select({ introducedById: people.introducedById }).from(people).where(eq(people.id, r.personId));
-      if (cur && !cur.introducedById) {
-        await loggedUpdate(outer, log, "people", r.personId, { introducedById: intro.committedPersonId }, { personId: r.proposalId });
-        report.introductions++;
-      }
-    }
+    // Phase 3: introducedBy among all committed people (fill blank only).
+    report.introductions = await linkIntroductions(outer, ctx, log, props);
     report.log = log.counts;
     return report;
   });
@@ -710,8 +896,40 @@ export async function commitImport(
 /*  Rollback                                                           */
 /* ------------------------------------------------------------------ */
 
-export type RollbackReport = { commits: string[]; reverted: Record<string, number>; refused: string[]; peopleRecomputed: number; dryRun: boolean };
+/** `kept`: shared rows (locations, tags, activities) the commit created that other data still uses. */
+export type RollbackReport = { commits: string[]; reverted: Record<string, number>; kept: Record<string, number>; refused: string[]; peopleRecomputed: number; dryRun: boolean };
 
+/**
+ * Shared rows a commit may have created and the app or later commits reuse: deleting one still in
+ * use would cascade away taggings / activities or unset people's home and met places. The log is
+ * replayed newest first, so references the rolled-back commits made are already gone when asked.
+ */
+const SHARED_REFS: Partial<Record<LoggedTable, (id: string) => SQL>> = {
+  locations: (id) => sql`select exists (select 1 from people where home_location_id = ${id}::uuid or met_location_id = ${id}::uuid) as used`,
+  tags: (id) => sql`select exists (select 1 from person_tags where tag_id = ${id}::uuid) as used`,
+  activities: (id) => sql`select exists (select 1 from person_activities where activity_id = ${id}::uuid) as used`,
+};
+
+/** Everything that references the given people (see rollbackBlockers). */
+async function personRefs(tx: Tx, ids: string[]): Promise<BlockerRef[]> {
+  const any = sql`any(${sql.param(ids)}::uuid[])`;
+  const rows = (await tx.execute(sql`
+    select 'note' as kind, person_id::text as person_id, id::text as other from notes where person_id = ${any} and deleted_at is null
+    union all select 'reminder', person_id::text, id::text from reminders where person_id = ${any}
+    union all select 'category', person_id::text, category_id::text from person_categories where person_id = ${any}
+    union all select 'tag', person_id::text, tag_id::text from person_tags where person_id = ${any}
+    union all select 'activity', person_id::text, activity_id::text from person_activities where person_id = ${any}
+    union all select 'mention', person_id::text, note_id::text from note_mentions where person_id = ${any}
+    union all select 'introduced', introduced_by_id::text, id::text from people where introduced_by_id = ${any}
+    union all select 'chat', person_id::text, id::text from chat_threads where person_id = ${any}`)) as unknown as { kind: BlockerRef["kind"]; person_id: string; other: string }[];
+  return rows.map((r) => ({ kind: r.kind, personId: r.person_id, other: r.other }));
+}
+
+/**
+ * Reverts commits from the log, newest first, in one transaction. Refuses (unless `force`) to delete
+ * people the user has built on since; keeps shared rows still in use. Updated columns go back to
+ * their logged previous values even if the user changed them since: the log has no after-values.
+ */
 export async function rollbackImport(db: DbOrTx, ownerId: string, opts: { commitId?: string; source?: string; dryRun: boolean; force?: boolean }): Promise<RollbackReport> {
   if (!opts.commitId && !opts.source) throw new ImportError(422, "rollback needs a commit id or a source");
   return inTransaction(db, !opts.dryRun, async (tx) => {
@@ -720,23 +938,19 @@ export async function rollbackImport(db: DbOrTx, ownerId: string, opts: { commit
       .from(importCommitLog)
       .where(and(eq(importCommitLog.ownerId, ownerId), opts.commitId ? eq(importCommitLog.commitId, opts.commitId) : eq(importCommitLog.source, opts.source!)))
       .orderBy(sql`${importCommitLog.id} desc`);
-    const report: RollbackReport = { commits: [...new Set(rows.map((r) => r.commitId))], reverted: {}, refused: [], peopleRecomputed: 0, dryRun: opts.dryRun };
+    const report: RollbackReport = { commits: [...new Set(rows.map((r) => r.commitId))], reverted: {}, kept: {}, refused: [], peopleRecomputed: 0, dryRun: opts.dryRun };
     if (!rows.length) return report;
 
-    // Refuse to delete people who have notes/reminders the log did not create (added by hand since).
-    const loggedIds = (t: string) => new Set(rows.filter((r) => r.tableName === t && r.op === "insert").map((r) => r.rowKey.id));
-    const loggedNotes = loggedIds("notes");
-    const loggedReminders = loggedIds("reminders");
-    const insertedPeople = [...loggedIds("people")];
+    // Refuse to delete people the user has built on since (cascades would take their additions along).
+    const insertedPeople = [...new Set(rows.filter((r) => r.tableName === "people" && r.op === "insert").map((r) => r.rowKey.id!))];
     if (insertedPeople.length) {
-      const foreignNotes = await tx.select({ id: notes.id, personId: notes.personId }).from(notes).where(and(inArray(notes.personId, insertedPeople), isNull(notes.deletedAt)));
-      const foreignRem = await tx.select({ id: remindersX.id, personId: remindersX.personId }).from(remindersX).where(inArray(remindersX.personId, insertedPeople));
-      const bad = new Map<string, string[]>();
-      for (const n of foreignNotes) if (!loggedNotes.has(n.id)) bad.set(n.personId, [...(bad.get(n.personId) ?? []), `note ${n.id}`]);
-      for (const r of foreignRem) if (!loggedReminders.has(r.id)) bad.set(r.personId, [...(bad.get(r.personId) ?? []), `reminder ${r.id}`]);
+      const bad = rollbackBlockers(insertedPeople, rows, await personRefs(tx, insertedPeople));
       if (bad.size && !opts.force) {
         report.refused = [...bad.entries()].map(([pid, what]) => `person ${pid}: ${what.join(", ")}`);
-        throw new ImportError(409, `Refusing to roll back: ${bad.size} imported people have notes/reminders not created by the import (pass --force to delete them too):\n  ${report.refused.slice(0, 20).join("\n  ")}`);
+        throw new ImportError(
+          409,
+          `Refusing to roll back: ${bad.size} imported people have notes, reminders, tags, mentions or links added since the import (pass --force to delete them too):\n  ${report.refused.slice(0, 20).join("\n  ")}`,
+        );
       }
     }
 
@@ -755,6 +969,14 @@ export async function rollbackImport(db: DbOrTx, ownerId: string, opts: { commit
       if (r.tableName === "notes" || r.tableName === "reminders") {
         const pr = (await tx.execute(sql`select person_id from ${t} t where ${where}`)) as unknown as { person_id: string }[];
         if (pr[0]) affectedPeople.add(pr[0].person_id);
+      }
+      const shared = r.op === "insert" ? SHARED_REFS[r.tableName as LoggedTable] : undefined;
+      if (shared) {
+        const [use] = (await tx.execute(shared(r.rowKey.id!))) as unknown as { used: boolean }[];
+        if (use?.used) {
+          report.kept[r.tableName] = (report.kept[r.tableName] ?? 0) + 1;
+          continue;
+        }
       }
       if (r.op === "insert") {
         await tx.execute(sql`delete from ${t} t where ${where}`);

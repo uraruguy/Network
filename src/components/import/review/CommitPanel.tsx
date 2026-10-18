@@ -1,5 +1,5 @@
 "use client";
-import { AlertTriangle, CheckCircle2, History, RefreshCw, Undo2, Users } from "lucide-react";
+import { AlertTriangle, CheckCircle2, History, RefreshCw, ShieldCheck, Undo2, UserX, Users } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GlassButton } from "@/components/glass/GlassButton";
@@ -200,17 +200,32 @@ export function CommitPanel({ source, onReview }: { source: string; onReview: ()
   );
 }
 
+/** "Ana Novak and 2 others were deleted in The Network and won’t be imported again." */
+function skippedSentence(skipped: CommitResult["people"]["skipped"]) {
+  const names = [...new Set(skipped.map((s) => s.name))];
+  const who = names.length > 1 ? `${names[0]} and ${plural(names.length - 1, "other")}` : names[0];
+  return `${who} ${names.length > 1 ? "were" : "was"} deleted in The Network and won’t be imported again.`;
+}
+
 function ReadyView({ dry, toReview, onReview, onCommit, onRecheck }: { dry: CommitResult; toReview: number; onReview: () => void; onCommit: () => void; onRecheck: () => void }) {
   const parts = commitSummary(dry);
   const people = dry.keys?.length ?? 0;
   const filed = dry.notes.created + dry.notes.updated + dry.notes.excerpts;
+  const skipped = dry.people.skipped;
+  const kept = dry.notes.deleted + dry.notes.edited;
   if (!people && !filed)
     return (
       <EmptyState
         compact
         icon={<CheckCircle2 />}
         title={toReview ? "Nothing to import yet" : "Everything is imported"}
-        description={toReview ? `Approve people first — ${plural(toReview, "person", "people")} still to review.` : "Everyone approved is already in The Network."}
+        description={
+          toReview
+            ? `Approve people first — ${plural(toReview, "person", "people")} still to review.`
+            : skipped.length
+              ? `${skippedSentence(skipped)} Everyone else approved is already in The Network.`
+              : "Everyone approved is already in The Network."
+        }
         action={
           toReview ? (
             <GlassButton variant="primary" size="sm" onClick={onReview}>
@@ -243,6 +258,18 @@ function ReadyView({ dry, toReview, onReview, onCommit, onRecheck }: { dry: Comm
           <li className="flex items-start gap-2">
             <History size={16} strokeWidth={2.2} className="mt-0.5 shrink-0 text-fg-3" aria-hidden />
             <span>{plural(dry.notes.waiting, "note")} wait for people you haven’t decided yet.</span>
+          </li>
+        )}
+        {skipped.length > 0 && (
+          <li className="flex items-start gap-2">
+            <UserX size={16} strokeWidth={2.2} className="mt-0.5 shrink-0 text-fg-3" aria-hidden />
+            <span>{skippedSentence(skipped)}</span>
+          </li>
+        )}
+        {kept > 0 && (
+          <li className="flex items-start gap-2">
+            <ShieldCheck size={16} strokeWidth={2.2} className="mt-0.5 shrink-0 text-fg-3" aria-hidden />
+            <span>{plural(kept, "note")} you deleted or edited in The Network stay as you left them.</span>
           </li>
         )}
         {failed > 0 && (

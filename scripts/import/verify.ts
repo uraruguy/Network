@@ -30,8 +30,11 @@ run(async () => {
   const items = await q<{ id: string; external_id: string; title: string | null; text: string; status: string; dismissed_reason: string | null; note_id: string | null; content_hash: string | null; candidates: unknown; extraction_version: number | null }>(sql`
     select id, external_id, title, text, status, dismissed_reason, note_id, content_hash, candidates, extraction_version
     from import_items where owner_id = ${owner.id} and source = ${ctx.source} and gone_at is null`);
-  const props = await q<{ id: string; key: string; status: string; disposition: string; merged_into_id: string | null; committed_person_id: string | null; needs_review: boolean }>(sql`
-    select id, key, status::text, disposition, merged_into_id, committed_person_id, needs_review from import_people where owner_id = ${owner.id} and source = ${ctx.source}`);
+  // person_deleted: the proposal's person was deleted in The Network (commits skip it on purpose).
+  const props = await q<{ id: string; key: string; status: string; disposition: string; merged_into_id: string | null; committed_person_id: string | null; needs_review: boolean; person_deleted: boolean }>(sql`
+    select p.id, p.key, p.status::text, p.disposition, p.merged_into_id, p.committed_person_id, p.needs_review,
+           exists (select 1 from people x where x.id = coalesce(p.committed_person_id, p.match_person_id) and x.deleted_at is not null) as person_deleted
+    from import_people p where p.owner_id = ${owner.id} and p.source = ${ctx.source}`);
   const mentions = await q<{ id: string; item_id: string; candidate_index: number | null; import_person_id: string | null; role: string; reason: string | null; excerpt: string | null }>(sql`
     select m.id, m.item_id, m.candidate_index, m.import_person_id, m.role, m.reason, m.excerpt
     from import_mentions m join import_items i on i.id = m.item_id where m.owner_id = ${owner.id} and i.source = ${ctx.source} and i.gone_at is null`);
@@ -70,8 +73,13 @@ run(async () => {
         continue;
       }
       const ps = roles.map((m) => final(m.import_person_id)).filter((p) => p && p.disposition === "person");
+      const deleted = ps.filter((p) => p!.person_deleted);
       if (ps.some((p) => p!.status === "proposed")) bump("in-review:person");
-      else if (ps.some((p) => p!.status === "approved")) fail("note-status", `${label} has approved people that are not committed (run commit)`);
+      else if (ps.some((p) => p!.status === "approved" && !p!.person_deleted)) fail("note-status", `${label} has approved people that are not committed (run commit)`);
+      else if (deleted.length) {
+        bump("kept:person-deleted");
+        warn("deleted-people", `${label} is not filed: ${deleted.map((p) => p!.key).join(", ")} deleted in The Network`);
+      }
       else if (roles.some((m) => m.role === "primary" && final(m.import_person_id)?.status === "rejected")) fail("note-status", `${label} is filed under a rejected person (re-run file-notes)`);
       else bump("in-review:other");
     } else fail("note-status", `${label} is still ${it.status} (stage incomplete)`);
@@ -80,18 +88,28 @@ run(async () => {
   // 2–4. Committed notes: verbatim, right person, mentions linked; excerpts substrings.
   const committed = items.filter((i) => i.status === "committed");
   const noteIds = committed.map((i) => i.note_id).filter((x): x is string => !!x);
+  // edited: changed in the app since the import last wrote it (same rule as the commit, which keeps it).
+  const lastWrite = sql`(select row_key->>'id' as id, max(created_at) as at from import_commit_log where owner_id = ${owner.id} and table_name = 'notes' group by 1)`;
   const notes = noteIds.length
-    ? await q<{ id: string; person_id: string; content_text: string; source_kind: string | null; source_ref: string | null; deleted_at: string | null }>(sql`
-        select id, person_id, content_text, source_kind, source_ref, deleted_at from notes where id in (${sql.join(noteIds.map((i) => sql`${i}::uuid`), sql`, `)})`)
+    ? await q<{ id: string; person_id: string; content_text: string; source_kind: string | null; source_ref: string | null; deleted_at: string | null; edited: boolean }>(sql`
+        select n.id, n.person_id, n.content_text, n.source_kind, n.source_ref, n.deleted_at,
+               (n.content_json is not null or n.updated_at > coalesce(w.at, n.created_at)) as edited
+        from notes n left join ${lastWrite} w on w.id = n.id::text
+        where n.id in (${sql.join(noteIds.map((i) => sql`${i}::uuid`), sql`, `)})`)
     : [];
   const noteById = new Map(notes.map((n) => [n.id, n]));
   const links = noteIds.length
     ? await q<{ note_id: string; person_id: string }>(sql`select note_id, person_id from note_mentions where note_id in (${sql.join(noteIds.map((i) => sql`${i}::uuid`), sql`, `)})`)
     : [];
   const linkSet = new Set(links.map((l) => `${l.note_id}|${l.person_id}`));
-  const excerptNotes = await q<{ source_ref: string; content_text: string; person_id: string }>(sql`
-    select source_ref, content_text, person_id from notes where owner_id = ${owner.id} and source_kind = 'apple-notes' and source_ref like '%#%' and deleted_at is null`);
-  const excerptByRef = new Map(excerptNotes.map((n) => [n.source_ref, n]));
+  const excerptNotes = await q<{ source_ref: string; content_text: string; person_id: string; deleted: boolean; edited: boolean }>(sql`
+    select n.source_ref, n.content_text, n.person_id, n.deleted_at is not null as deleted,
+           (n.content_json is not null or n.updated_at > coalesce(w.at, n.created_at)) as edited
+    from notes n left join ${lastWrite} w on w.id = n.id::text
+    where n.owner_id = ${owner.id} and n.source_kind = 'apple-notes' and n.source_ref like '%#%'
+    order by n.deleted_at nulls first`);
+  const excerptByRef = new Map<string, (typeof excerptNotes)[number]>();
+  for (const n of excerptNotes) if (!excerptByRef.has(n.source_ref)) excerptByRef.set(n.source_ref, n); // live first
   let verbatim = 0;
   let excerptOk = 0;
   for (const it of committed) {
@@ -104,10 +122,14 @@ run(async () => {
         fail("verbatim", `${label}: note ${it.note_id} missing`);
         continue;
       }
-      if (n.deleted_at) fail("verbatim", `${label}: note deleted`);
+      if (n.deleted_at) {
+        warn("kept", `${label}: deleted in The Network (stays deleted)`);
+        continue;
+      }
       if (n.source_ref !== it.external_id || n.source_kind !== "apple-notes") fail("verbatim", `${label}: source_ref ${n.source_ref} ≠ external_id`);
-      if (sha1(n.content_text.trim()) !== it.content_hash) fail("verbatim", `${label}: content_text hash ≠ content_hash`);
-      else verbatim++;
+      if (sha1(n.content_text.trim()) === it.content_hash) verbatim++;
+      else if (n.edited) warn("kept", `${label}: edited in The Network (the commit keeps your version)`);
+      else fail("verbatim", `${label}: content_text hash ≠ content_hash`);
       if (primary) {
         const p = final(primary.import_person_id);
         if (!p?.committed_person_id) fail("primary", `${label}: primary proposal not committed`);
@@ -124,11 +146,16 @@ run(async () => {
         if (!p || p.disposition !== "person" || p.status === "rejected") continue;
         const n = excerptByRef.get(`${it.external_id}#${p.key}`);
         if (!n) {
-          if (p.committed_person_id) fail("excerpts", `${label}: excerpt note for ${p.key} missing`);
+          if (p.committed_person_id && !p.person_deleted) fail("excerpts", `${label}: excerpt note for ${p.key} missing`);
           continue;
         }
-        if (!it.text.includes(n.content_text)) fail("excerpts", `${label}: excerpt for ${p.key} is not a substring of the note`);
-        else excerptOk++;
+        if (n.deleted) {
+          warn("kept", `${label}: excerpt for ${p.key} deleted in The Network (stays deleted)`);
+          continue;
+        }
+        if (it.text.includes(n.content_text)) excerptOk++;
+        else if (n.edited) warn("kept", `${label}: excerpt for ${p.key} edited in The Network (kept)`);
+        else fail("excerpts", `${label}: excerpt for ${p.key} is not a substring of the note`);
         if (p.committed_person_id && n.person_id !== p.committed_person_id) fail("excerpts", `${label}: excerpt for ${p.key} filed under the wrong person`);
       }
     }

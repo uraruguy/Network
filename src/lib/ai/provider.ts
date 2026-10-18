@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import type { LanguageModel, ToolSet } from "ai";
@@ -12,13 +13,29 @@ import type { AiConfig } from "./config";
  *  - openrouter: OpenRouter API key (default when OPENROUTER_API_KEY is set).
  *
  * Two entry points:
- *  - `aiModel({ tier })`          the import pipeline (env-configured, strongest models).
+ *  - `aiModel({ tier })`          the import pipeline (env-configured, strongest models). In-app
+ *                                 import calls run inside `withImportAi(ownerConfig, …)`, so the
+ *                                 connection saved in Settings works there too (as it does for chat).
  *  - `chatModel(config, tier)`    the in-app assistant (fast models, prompt caching, low effort);
  *                                 driven by `getAiConfig()` so a per-owner connection can replace env.
  */
 export type AiProvider = "agent-sdk" | "anthropic" | "openrouter";
 
+/**
+ * The owner's AI connection for the import calls of one request (quick import, inbox triage, the
+ * in-app Apple Notes job). Scoped per async call chain, so concurrent requests never share it; the
+ * CLI pipeline never sets it and keeps reading the environment.
+ */
+const importAi = new AsyncLocalStorage<AiConfig>();
+
+/** Runs `fn` with `config` (from `getAiConfig(ownerId)`) as the import pipeline's AI connection. */
+export function withImportAi<T>(config: AiConfig, fn: () => Promise<T>): Promise<T> {
+  return importAi.run(config, fn);
+}
+
 export function aiProvider(): AiProvider | null {
+  const scoped = importAi.getStore();
+  if (scoped) return scoped.provider === "off" ? null : scoped.provider;
   const env = serverEnv();
   const forced = env.AI_PROVIDER;
   if (forced === "agent-sdk") return "agent-sdk";
@@ -81,10 +98,18 @@ async function agentSdkModel(modelId: string, tools: ToolSet | undefined, maxTur
  * so pass `tools` here as well as to streamText/generateText.
  */
 export async function aiModel(opts: ModelOptions = {}): Promise<LanguageModel> {
+  const tier = opts.tier ?? "main";
+  const scoped = importAi.getStore();
+  if (scoped?.source === "db") {
+    // A connection saved in Settings (API-key providers only), with its own models.
+    const modelId = tier === "main" ? scoped.mainModel : scoped.fastModel;
+    if (scoped.provider === "anthropic") return anthropicClient(scoped.apiKey!)(modelId);
+    if (scoped.provider === "openrouter") return openrouterClient(scoped.apiKey!).chat(modelId);
+    throw new Error("AI isn’t configured — connect a provider in Settings → AI & e-mail");
+  }
   const env = serverEnv();
   const provider = aiProvider();
   if (!provider) throw new Error("No AI provider configured (set ANTHROPIC_API_KEY, OPENROUTER_API_KEY, or AI_PROVIDER=agent-sdk)");
-  const tier = opts.tier ?? "main";
 
   if (provider === "agent-sdk") {
     const modelId = tier === "main" ? env.AI_MODEL_MAIN ?? MODELS.main["agent-sdk"] : env.AI_MODEL_FAST ?? MODELS.fast["agent-sdk"];
