@@ -8,7 +8,7 @@ Personal relationship manager for one owner. People-centric notes, MapLibre glob
 Next.js 16 (App Router, Turbopack, `src/proxy.ts` instead of middleware) · React 19 · TypeScript · Tailwind v4 · Base UI · Motion · Supabase (Postgres + Auth) · Drizzle ORM · TanStack Query (IndexedDB persist) · MapLibre GL · Tiptap 3 · Vercel AI SDK (Anthropic / OpenRouter / Claude Agent SDK) · MCP SDK · SimpleWebAuthn · Resend/Nodemailer · Serwist.
 
 ## Commands
-- `pnpm dev` — http://localhost:3100 (+ service-worker watcher). Use localhost, not 127.0.0.1 (passkey RP id).
+- `pnpm dev` — http://localhost:3100 (service worker off; `pnpm dev:sw` turns it on, or test offline with `pnpm build && pnpm start`). Use localhost, not 127.0.0.1 (passkey RP id).
 - `supabase start` then `pnpm bootstrap` — local stack + `.env.local` (never overwrites values) + local owner account. `pnpm db:seed-cities` once per database.
 - `pnpm typecheck` (runs `next typegen` first) · `pnpm lint` · `pnpm lint:design --strict` · `pnpm test` · `pnpm build` — all run in CI (`.github/workflows/ci.yml`).
 - `TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres pnpm test` — adds the local DB tests.

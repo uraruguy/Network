@@ -208,7 +208,8 @@ Turn on *Show in Share Sheet*; shared text lands in the inbox on Today for AI tr
 
 | Command | What it does |
 | --- | --- |
-| `pnpm dev` | Dev server on http://localhost:3100 plus the service-worker watcher |
+| `pnpm dev` | Dev server on http://localhost:3100 (service worker off: it would fight Fast Refresh) |
+| `pnpm dev:sw` | Dev server with the service worker and its watcher (`NEXT_PUBLIC_SW_DEV=1`), to test offline |
 | `pnpm build` / `pnpm start` | Production build (Next.js + Serwist service worker) / serve it |
 | `pnpm typecheck` | `next typegen` (route types) + `tsc --noEmit` |
 | `pnpm lint` / `pnpm lint:design` | ESLint / design-token lint for `src/components` (`--strict` in CI) |
