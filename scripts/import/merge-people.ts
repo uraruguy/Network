@@ -3,6 +3,7 @@
  *   pnpm tsx scripts/import/merge-people.ts --from <duplicate personId> --into <kept personId> [--write]
  * Dry run unless --write (one transaction, rolled back). See mergePeople() for what moves.
  * Take a backup first (backup.ts); the merge is recorded in audit_log as person.merge.
+ * In the app: More → Merge with… on a person (POST /api/people/[id]/merge).
  */
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
